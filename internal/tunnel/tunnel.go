@@ -16,6 +16,12 @@ import (
 // safeHostPattern allows only valid SSH host names (alphanumeric, dots, hyphens, underscores).
 var safeHostPattern = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
+// lookSSHPath resolves the ssh client. It is a variable so tests can substitute
+// a stand-in binary: the real client's lifetime depends on whether an sshd
+// happens to answer, which would make start/stop tests pass or fail by accident
+// of the environment rather than by the code under test.
+var lookSSHPath = func() (string, error) { return exec.LookPath("ssh") }
+
 // validateInput sanitizes all dynamic arguments before passing to exec.Command
 // to prevent command injection.
 func validateInput(host string, ports []PortForward) error {
@@ -66,7 +72,7 @@ func ReadLog(dir, host, service, portName string) string {
 // Start opens one SSH tunnel per port in Ports. Returns a state per successfully started tunnel.
 // If any port fails, previously started tunnels for this call are rolled back (killed).
 func Start(opts *StartOptions) ([]*TunnelState, error) {
-	sshPath, err := exec.LookPath("ssh")
+	sshPath, err := lookSSHPath()
 	if err != nil {
 		return nil, fmt.Errorf("ssh not found in PATH. Please install OpenSSH")
 	}

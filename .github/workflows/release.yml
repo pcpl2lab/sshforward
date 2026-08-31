@@ -1,12 +1,28 @@
 name: Release
 
+# Releases are cut on demand. The tag and the GitHub release are both created
+# here, by the release step itself, so nothing is published by pushing a tag by
+# hand and a failed build leaves no stray tag behind.
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. v1.2.3 or v1.2.3-rc.1"
+        required: true
+        type: string
+      draft:
+        description: "Publish as a draft, to review before it goes out"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
+
+# Two releases running at once would race over the tag and over dist/.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -14,13 +30,67 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # the changelog is built from history
+
+      # The input reaches the shell through the environment, never through
+      # template interpolation, so it cannot be injected into the script.
+      - name: Validate the version
+        id: check
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::version must look like v1.2.3 or v1.2.3-rc.1, got '$VERSION'"
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            echo "::error::tag $VERSION already exists"
+            exit 1
+          fi
+          # GoReleaser derives the changelog range from the previous tag. It
+          # normally finds it by walking back from the current tag, which does
+          # not exist yet here, so hand it over explicitly. Empty on the first
+          # release, which correctly logs the whole history.
+          echo "previous_tag=$(git describe --tags --abbrev=0 2>/dev/null || true)" >>"$GITHUB_OUTPUT"
+
       - uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
+          cache: true
+
+      # Nothing is tagged or published before it is known to build and pass.
+      - name: Verify
+        run: |
+          go vet ./...
+          go test ./... -count=1
+
+      # Builds the archives, checksums and dist/CHANGELOG.md.
+      #
+      # Both env vars are load-bearing. GORELEASER_CURRENT_TAG supplies the
+      # version for ldflags, archive names and the Windows resource, since no
+      # tag exists yet. skip=validate is what allows that: validation insists a
+      # tag points at HEAD. skip=publish leaves the release to the next step.
       - uses: goreleaser/goreleaser-action@v7.2.3
         with:
-          version: latest
-          args: release --clean
+          version: "~> v2"
+          args: release --clean --skip=publish,validate
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ inputs.version }}
+          GORELEASER_PREVIOUS_TAG: ${{ steps.check.outputs.previous_tag }}
+
+      # Creates the tag on the exact commit that was built and tested, and the
+      # release along with it.
+      - uses: softprops/action-gh-release@v3.0.3
+        with:
+          tag_name: ${{ inputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ inputs.version }}
+          body_path: dist/CHANGELOG.md
+          draft: ${{ inputs.draft }}
+          prerelease: ${{ contains(inputs.version, '-') }}
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt

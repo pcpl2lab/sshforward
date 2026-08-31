@@ -130,21 +130,6 @@ A good pull request:
 - updates `README.md` when it changes user-visible behaviour,
 - leaves `gofmt`, `go vet`, the tests and the linter clean.
 
-## Releases
-
-Maintainers cut a release by pushing a tag:
-
-```bash
-git tag v1.2.3
-git push origin v1.2.3
-```
-
-That triggers [`.github/workflows/release.yml`](.github/workflows/release.yml),
-which runs [GoReleaser](https://goreleaser.com/) to build archives for Linux,
-macOS and Windows on `amd64` and `arm64`, publish checksums, and generate the
-changelog. Version, commit and build date are injected via `-ldflags`; verify
-with `sshforward version`.
-
 ## Reporting bugs
 
 Open an issue with the output of `sshforward version`, your OS, a minimal

@@ -5,14 +5,68 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"testing"
+	"time"
 )
 
-func TestStartAndStopTunnel_SinglePort(t *testing.T) {
-	if _, err := exec.LookPath("ssh"); err != nil {
-		t.Skip("ssh not available, skipping integration test")
+// TestMain doubles as the body of the stand-in ssh client. When this binary has
+// been copied to a file named "ssh" it must behave like a long-lived tunnel
+// process rather than run the test suite. The check is on the executable's own
+// name because the child inherits the parent's environment, so an env var would
+// make the parent match too. flag parsing happens inside m.Run, so ssh's
+// arguments never reach it.
+func TestMain(m *testing.M) {
+	if base := filepath.Base(os.Args[0]); base == "ssh" || base == "ssh.exe" {
+		fakeSSH()
+		os.Exit(0)
 	}
+	os.Exit(m.Run())
+}
+
+// fakeSSH mimics the parts of `ssh -N -E <log> -L ...` that Start observes: it
+// creates the log file and then stays alive until it is killed.
+func fakeSSH() {
+	for i, a := range os.Args {
+		if a == "-E" && i+1 < len(os.Args) {
+			_ = os.WriteFile(os.Args[i+1], []byte("stand-in ssh client\n"), 0o600)
+		}
+	}
+	time.Sleep(2 * time.Minute)
+}
+
+// useFakeSSH points Start at the stand-in for the duration of the test.
+//
+// The real client cannot be used for start/stop tests: on any machine running
+// sshd — every GitHub runner — it is rejected and exits within milliseconds, so
+// the liveness check sees a dead process; on a machine without one it lingers
+// long enough to pass. The outcome would depend on the environment instead of
+// on the code. TestBuildSSHArgs_OptionsAcceptedByRealSSH covers the real client
+// separately, without needing a server.
+func useFakeSSH(t *testing.T) {
+	t.Helper()
+
+	self, err := os.ReadFile(os.Args[0])
+	if err != nil {
+		t.Skipf("cannot read the test binary to build a stand-in ssh: %v", err)
+	}
+	name := "ssh"
+	if runtime.GOOS == "windows" {
+		name = "ssh.exe"
+	}
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, self, 0o755); err != nil {
+		t.Fatalf("write stand-in ssh: %v", err)
+	}
+
+	previous := lookSSHPath
+	lookSSHPath = func() (string, error) { return path, nil }
+	t.Cleanup(func() { lookSSHPath = previous })
+}
+
+func TestStartAndStopTunnel_SinglePort(t *testing.T) {
+	useFakeSSH(t)
 
 	tunnelsDir := t.TempDir()
 
@@ -63,9 +117,7 @@ func TestStartAndStopTunnel_SinglePort(t *testing.T) {
 }
 
 func TestStartAndStopTunnel_MultiPort(t *testing.T) {
-	if _, err := exec.LookPath("ssh"); err != nil {
-		t.Skip("ssh not available, skipping integration test")
-	}
+	useFakeSSH(t)
 
 	tunnelsDir := t.TempDir()
 
@@ -119,9 +171,7 @@ func TestStop_NonExistentTunnel(t *testing.T) {
 }
 
 func TestStart_LiveNonSSHPIDIsStale(t *testing.T) {
-	if _, err := exec.LookPath("ssh"); err != nil {
-		t.Skip("ssh not available, skipping integration test")
-	}
+	useFakeSSH(t)
 
 	tunnelsDir := t.TempDir()
 	// A PID that is alive but is not ssh: after a reboot or PID wraparound an
@@ -155,9 +205,8 @@ func TestStart_LiveNonSSHPIDIsStale(t *testing.T) {
 }
 
 func TestStart_OrphanedStateCleanup(t *testing.T) {
-	if _, err := exec.LookPath("ssh"); err != nil {
-		t.Skip("ssh not available")
-	}
+	useFakeSSH(t)
+
 	tunnelsDir := t.TempDir()
 	state := &TunnelState{
 		Host: "localhost", Service: "test", PID: 999999999,
@@ -228,5 +277,36 @@ func TestLogPath(t *testing.T) {
 	expected := filepath.Join(dir, "p1-gitea-web.log")
 	if got != expected {
 		t.Errorf("expected %s, got %s", expected, got)
+	}
+}
+
+func TestBuildSSHArgs_OptionsAcceptedByRealSSH(t *testing.T) {
+	sshPath, err := exec.LookPath("ssh")
+	if err != nil {
+		t.Skip("ssh not available, skipping option check")
+	}
+
+	// -G makes ssh evaluate its configuration and print it without connecting,
+	// which checks every -o key against the installed OpenSSH. A misspelled
+	// option would otherwise only show up as a tunnel that refuses to start,
+	// and only on a user's machine. -F points at an empty config so the
+	// developer's own ~/.ssh/config cannot influence the result.
+	emptyConfig := filepath.Join(t.TempDir(), "empty_ssh_config")
+	if err := os.WriteFile(emptyConfig, nil, 0o600); err != nil {
+		t.Fatalf("write empty ssh config: %v", err)
+	}
+
+	built := buildSSHArgs(filepath.Join(t.TempDir(), "ssh.log"), "13306:127.0.0.1:3306", "localhost")
+	args := []string{"-G", "-F", emptyConfig}
+	for i, a := range built {
+		if a == "-o" && i+1 < len(built) {
+			args = append(args, "-o", built[i+1])
+		}
+	}
+	args = append(args, "localhost")
+
+	out, err := exec.Command(sshPath, args...).CombinedOutput()
+	if err != nil {
+		t.Errorf("OpenSSH rejected the options sshforward passes: %v\n%s", err, out)
 	}
 }

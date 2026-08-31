@@ -399,7 +399,7 @@ such process exists, remove the stale
 ```bash
 go generate ./...               # Windows version resource (see winres/)
 go build -o sshforward .        # build
-go test ./... -count=1          # tests (SSH-dependent tests skip without ssh)
+go test ./... -count=1          # tests
 go vet ./...                    # static analysis
 golangci-lint run ./...         # lint (v2.13.2, see .golangci.yml)
 ```
@@ -409,15 +409,6 @@ description, company, copyright and version — plus an icon and an application
 manifest declaring `asInvoker` (so it never triggers a UAC prompt) and long-path
 awareness. It is built from `winres/winres.json`; release builds get the real
 tag, local builds are stamped `0.0.0.0`.
-
-CI runs build, vet and tests on Linux, macOS and Windows, plus a lint job; see
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml). The Go version is taken
-from `go.mod`, so bumping the `go` directive is enough to move CI along with it.
-
-Releases are cut by pushing a `v*` tag, which triggers
-[GoReleaser](https://goreleaser.com/) via
-[`.github/workflows/release.yml`](.github/workflows/release.yml). Version,
-commit and build date are injected into the binary through `-ldflags`.
 
 ## Contributing
 
