@@ -62,10 +62,10 @@ func ensureConfigFile(path string) error {
 		return fmt.Errorf("cannot access config: %w", err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("cannot create config directory: %w", err)
 	}
-	if err := os.WriteFile(path, []byte(defaultConfigTemplate), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(defaultConfigTemplate), 0o600); err != nil {
 		return fmt.Errorf("cannot create config file: %w", err)
 	}
 	return nil

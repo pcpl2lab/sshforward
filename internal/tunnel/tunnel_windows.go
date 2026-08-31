@@ -7,10 +7,11 @@ import (
 	"syscall"
 )
 
-const _DETACHED_PROCESS = 0x00000008
+// detachedProcess is the Win32 DETACHED_PROCESS creation flag (not in syscall).
+const detachedProcess = 0x00000008
 
 func setSysProcAttr(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | _DETACHED_PROCESS,
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | detachedProcess,
 	}
 }

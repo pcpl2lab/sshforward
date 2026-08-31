@@ -3,8 +3,9 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 
-	"github.com/pcpl2/sshforward/internal/config"
 	"github.com/pcpl2/sshforward/internal/sshconfig"
 	"github.com/pcpl2/sshforward/internal/tunnel"
 	"github.com/spf13/cobra"
@@ -14,13 +15,13 @@ var startCmd = &cobra.Command{
 	Use:   "start <host> <service>",
 	Short: "Start an SSH port forwarding tunnel",
 	Args:  cobra.ExactArgs(2),
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, args []string) error {
 		host := args[0]
 		service := args[1]
 
-		cfg, err := config.Load()
+		cfg, err := loadConfig()
 		if err != nil {
-			return fmt.Errorf("config not found. Create ~/.sshforward/config.yaml with your service definitions")
+			return err
 		}
 
 		svc, err := cfg.GetService(service)
@@ -29,7 +30,8 @@ var startCmd = &cobra.Command{
 			for n := range cfg.Services {
 				names = append(names, n)
 			}
-			return fmt.Errorf("unknown service %q. Available services: %v", service, names)
+			sort.Strings(names) // map order is random; keep the hint stable
+			return fmt.Errorf("unknown service %q. Available services: %s", service, strings.Join(names, ", "))
 		}
 
 		if err := sshconfig.ValidateHost(host); err != nil {

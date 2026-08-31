@@ -1,0 +1,65 @@
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - ineffassign
+    - unused
+    - misspell
+    - gocritic
+    - revive
+    - gosec
+  settings:
+    errcheck:
+      # Best-effort writes/cleanup where the error is intentionally ignored.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (*text/tabwriter.Writer).Flush
+        - (*os.File).Close
+        - (net.Listener).Close
+        - (net.Conn).Close
+        - (*os.Process).Release
+        - golang.org/x/sys/windows.CloseHandle
+        - (*github.com/pcpl2/sshforward/internal/tunnel.FileLock).Release
+    gosec:
+      excludes:
+        - G304 # reading user-specified config/state paths is the tool's purpose
+        - G103 # unsafe.Pointer required for LockFileEx OVERLAPPED on Windows
+        - G104 # duplicate of errcheck, which is configured with exclusions
+    revive:
+      rules:
+        # Internal CLI tool — doc comments on every exported symbol add noise.
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+  exclusions:
+    rules:
+      # exec.Command with validated, non-shell args is intentional here
+      - path: internal/tunnel/tunnel.go
+        linters:
+          - gosec
+        text: "G204"
+      - path: cmd/edit.go
+        linters:
+          - gosec
+        text: "G204"
+      # ps -p <pid> fallback on macOS — pid goes through strconv.Itoa
+      - path: internal/tunnel/process_unix.go
+        linters:
+          - gosec
+        text: "G204"
+      # Tests: setup errors surface as test failures anyway; temp-file
+      # permissions in t.TempDir() are not a security concern.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+
+formatters:
+  enable:
+    - gofmt

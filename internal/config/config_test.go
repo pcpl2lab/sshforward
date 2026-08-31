@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -340,5 +341,104 @@ func TestLoadConfig_UnknownFieldInPort(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "local_port") {
 		t.Errorf("error should suggest 'local_port', got: %v", err)
+	}
+}
+
+func TestLoad_UnknownTopLevelKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	os.WriteFile(path, []byte("service:\n  mysql:\n    remote_port: 3306\n"), 0644)
+
+	_, err := LoadFromPath(path)
+	if err == nil {
+		t.Fatal("expected error for unknown top-level key 'service'")
+	}
+	if !strings.Contains(err.Error(), "unknown top-level field") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestLoad_ValidTopLevelStillWorks(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	os.WriteFile(path, []byte("services:\n  mysql:\n    remote_port: 3306\n"), 0644)
+
+	cfg, err := LoadFromPath(path)
+	if err != nil {
+		t.Fatalf("valid config must load: %v", err)
+	}
+	if _, err := cfg.GetService("mysql"); err != nil {
+		t.Errorf("mysql should exist: %v", err)
+	}
+}
+
+func TestLoadConfig_MissingFileIsErrNotExist(t *testing.T) {
+	// cmd.loadConfig relies on errors.Is to tell "no config yet" apart from
+	// "config is broken"; keep the wrapping intact.
+	_, err := LoadFromPath(filepath.Join(t.TempDir(), "does-not-exist.yaml"))
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("missing config must wrap os.ErrNotExist, got: %v", err)
+	}
+}
+
+func TestLoadConfig_PortRange(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{
+			name:    "local_port above range",
+			yaml:    "services:\n  mysql:\n    remote_port: 3306\n    local_port: 99999\n",
+			wantErr: "local_port: 99999 is out of range",
+		},
+		{
+			name:    "local_port negative",
+			yaml:    "services:\n  mysql:\n    remote_port: 3306\n    local_port: -1\n",
+			wantErr: "local_port: -1 is out of range",
+		},
+		{
+			name:    "remote_port above range",
+			yaml:    "services:\n  mysql:\n    remote_port: 70000\n",
+			wantErr: "remote_port: 70000 is out of range",
+		},
+		{
+			name:    "multi-port remote_port above range",
+			yaml:    "services:\n  gitea:\n    ports:\n      - name: web\n        remote_port: 70000\n      - name: ssh\n        remote_port: 2222\n",
+			wantErr: `port "web": remote_port: 70000 is out of range`,
+		},
+		{
+			name:    "multi-port local_port above range",
+			yaml:    "services:\n  gitea:\n    ports:\n      - name: web\n        remote_port: 3000\n        local_port: 65536\n      - name: ssh\n        remote_port: 2222\n",
+			wantErr: "local_port: 65536 is out of range",
+		},
+		{
+			name:    "boundary ports are accepted",
+			yaml:    "services:\n  edge:\n    remote_port: 65535\n    local_port: 1\n",
+			wantErr: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tt.yaml), 0600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+
+			_, err := LoadFromPath(path)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("got error %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("got nil error, want one containing %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("got error %q, want it to contain %q", err, tt.wantErr)
+			}
+		})
 	}
 }

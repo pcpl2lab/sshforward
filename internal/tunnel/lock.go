@@ -16,11 +16,11 @@ func LockPath(dir, host, service string) string {
 }
 
 func AcquireLock(path string) (*FileLock, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, fmt.Errorf("cannot create lock directory: %w", err)
 	}
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("cannot open lock file: %w", err)
 	}
@@ -37,9 +37,9 @@ func (l *FileLock) Release() error {
 	if l.file == nil {
 		return nil
 	}
-	unlockFile(l.file)
+	_ = unlockFile(l.file) // best-effort: Close below releases the lock anyway
 	err := l.file.Close()
 	l.file = nil
-	os.Remove(l.path)
+	_ = os.Remove(l.path) // best-effort cleanup of the lock file
 	return err
 }

@@ -40,7 +40,7 @@ var listCmd = &cobra.Command{
 				portName = s.PortName
 			}
 
-			if !tunnel.IsProcessAlive(s.PID) {
+			if !tunnel.IsTunnelAlive(s.PID) {
 				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\t%d\t%s\n",
 					s.Host, s.Service, portName, s.LocalPort, remote, s.PID, "DEAD")
 				deadTunnels = append(deadTunnels, s)
@@ -54,7 +54,7 @@ var listCmd = &cobra.Command{
 		// Show logs for dead tunnels and clean them up
 		for _, s := range deadTunnels {
 			log := tunnel.ReadLog(tunnelsDir, s.Host, s.Service, s.PortName)
-			if log != "" && log != "(empty log)" {
+			if log != "" {
 				label := fmt.Sprintf("%s/%s", s.Host, s.Service)
 				if s.PortName != "" {
 					label = fmt.Sprintf("%s/%s/%s", s.Host, s.Service, s.PortName)
@@ -62,8 +62,8 @@ var listCmd = &cobra.Command{
 				fmt.Fprintf(os.Stderr, "\n--- SSH log for %s (DEAD) ---\n%s\n", label, log)
 			}
 			statePath := tunnel.StatePathWithPort(tunnelsDir, s.Host, s.Service, s.PortName)
-			tunnel.RemoveState(statePath)
-			os.Remove(tunnel.LogPath(tunnelsDir, s.Host, s.Service, s.PortName))
+			_ = tunnel.RemoveState(statePath) // best-effort cleanup of dead tunnel
+			_ = os.Remove(tunnel.LogPath(tunnelsDir, s.Host, s.Service, s.PortName))
 		}
 
 		return nil

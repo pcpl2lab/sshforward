@@ -12,7 +12,7 @@ var logsCmd = &cobra.Command{
 	Use:   "logs [<host> <service>]",
 	Short: "Show SSH stderr logs for tunnels",
 	Args:  cobra.RangeArgs(0, 2),
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, args []string) error {
 		tunnelsDir, err := tunnel.TunnelsDir()
 		if err != nil {
 			return err
@@ -39,7 +39,7 @@ var logsCmd = &cobra.Command{
 				label = fmt.Sprintf("%s/%s/%s", s.Host, s.Service, s.PortName)
 			}
 			status := "active"
-			if !tunnel.IsProcessAlive(s.PID) {
+			if !tunnel.IsTunnelAlive(s.PID) {
 				status = "DEAD"
 			}
 			log := tunnel.ReadLog(tunnelsDir, s.Host, s.Service, s.PortName)

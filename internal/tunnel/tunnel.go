@@ -72,30 +72,30 @@ func Start(opts *StartOptions) ([]*TunnelState, error) {
 	}
 
 	// Ensure tunnels dir exists
-	if err := os.MkdirAll(opts.TunnelsDir, 0755); err != nil {
+	if err := os.MkdirAll(opts.TunnelsDir, 0700); err != nil {
 		return nil, fmt.Errorf("cannot create tunnels directory: %w", err)
 	}
 
-	// Resolve local ports upfront (all-or-nothing)
+	// Resolve local ports upfront (all-or-nothing). Each port stays reserved —
+	// held open by a listener of ours — until the ssh process that will bind it
+	// is spawned, so neither a concurrent sshforward run nor a second port of
+	// this same service can take it in the meantime.
 	type resolvedPort struct {
 		PortForward
-		localPort int
+		reservation *port.Reservation
 	}
-	resolved := make([]resolvedPort, len(opts.Ports))
-	for i, pf := range opts.Ports {
-		lp := pf.LocalPort
-		if lp == 0 {
-			p, err := port.FindFree()
-			if err != nil {
-				return nil, fmt.Errorf("port %q: cannot find free port: %w", pf.Name, err)
-			}
-			lp = p
-		} else {
-			if err := port.CheckAvailable(lp); err != nil {
-				return nil, fmt.Errorf("port %q: %w", pf.Name, err)
-			}
+	resolved := make([]resolvedPort, 0, len(opts.Ports))
+	defer func() {
+		for _, rp := range resolved {
+			rp.reservation.Release() // no-op once handed over to ssh
 		}
-		resolved[i] = resolvedPort{PortForward: pf, localPort: lp}
+	}()
+	for _, pf := range opts.Ports {
+		res, err := port.Reserve(pf.LocalPort)
+		if err != nil {
+			return nil, fmt.Errorf("port %q: %w", pf.Name, err)
+		}
+		resolved = append(resolved, resolvedPort{PortForward: pf, reservation: res})
 	}
 
 	// Check for already-active tunnels and acquire locks
@@ -120,23 +120,25 @@ func Start(opts *StartOptions) ([]*TunnelState, error) {
 
 		statePath := StatePathWithPort(opts.TunnelsDir, opts.Host, opts.Service, rp.Name)
 		if existing, err := LoadState(statePath); err == nil {
-			if IsProcessAlive(existing.PID) {
+			// IsTunnelAlive, not IsProcessAlive: a recycled PID belonging to an
+			// unrelated process must not block a start. Matches list and stop.
+			if IsTunnelAlive(existing.PID) {
 				return nil, fmt.Errorf("tunnel %s/%s%s is already running on port %d (PID: %d)",
 					opts.Host, opts.Service, portLabel(rp.Name), existing.LocalPort, existing.PID)
 			}
-			RemoveState(statePath)
+			_ = RemoveState(statePath) // stale state from a dead tunnel
 		}
 	}
 
 	// Start SSH processes
 	var states []*TunnelState
 	for _, rp := range resolved {
-		state, err := startSingle(sshPath, opts, rp.PortForward, rp.localPort)
+		state, err := startSingle(sshPath, opts, rp.PortForward, rp.reservation)
 		if err != nil {
-			// Rollback: kill previously started tunnels
+			// Rollback: kill previously started tunnels (best-effort)
 			for _, s := range states {
-				KillProcess(s.PID)
-				RemoveState(StatePathWithPort(opts.TunnelsDir, opts.Host, opts.Service, s.PortName))
+				_ = KillProcess(s.PID)
+				_ = RemoveState(StatePathWithPort(opts.TunnelsDir, opts.Host, opts.Service, s.PortName))
 			}
 			return nil, fmt.Errorf("port %q: %w", rp.Name, err)
 		}
@@ -146,31 +148,48 @@ func Start(opts *StartOptions) ([]*TunnelState, error) {
 	return states, nil
 }
 
-func startSingle(sshPath string, opts *StartOptions, pf PortForward, localPort int) (*TunnelState, error) {
+// buildSSHArgs constructs the argument list for the detached ssh process.
+// BatchMode=yes turns interactive prompts (unknown host, password) into
+// immediate failures logged to -E, instead of silently hanging a process
+// that has no stdin. StrictHostKeyChecking=accept-new auto-trusts new hosts
+// but still refuses on a changed key.
+func buildSSHArgs(logPath, forwardArg, host string) []string {
+	return []string{
+		"-N",          // no remote command
+		"-E", logPath, // SSH writes logs to file directly
+		"-o", "BatchMode=yes", // fail fast, never prompt (no stdin when detached)
+		"-o", "StrictHostKeyChecking=accept-new", // trust new hosts, reject changed keys
+		"-o", "ExitOnForwardFailure=yes", // exit if port forward fails
+		"-o", "ConnectTimeout=10", // fail fast if host unreachable
+		"-o", "ServerAliveInterval=15", // keepalive every 15s
+		"-o", "ServerAliveCountMax=3", // disconnect after 3 missed keepalives
+		"-L", forwardArg,
+		host,
+	}
+}
+
+func startSingle(sshPath string, opts *StartOptions, pf PortForward, res *port.Reservation) (*TunnelState, error) {
 	// Validate all dynamic inputs before exec to prevent command injection.
 	if err := validateInput(opts.Host, []PortForward{pf}); err != nil {
 		return nil, err
 	}
 
+	localPort := res.Port()
 	logPath := LogPath(opts.TunnelsDir, opts.Host, opts.Service, pf.Name)
 	forwardArg := fmt.Sprintf("%d:%s:%d", localPort, pf.RemoteHost, pf.RemotePort)
 
 	// Use SSH's own -E flag for logging — no file handle inheritance needed.
 	// This allows the process to be fully detached on Windows.
-	cmd := exec.Command(sshPath, // nosemgrep: dangerous-exec-command
-		"-N",                             // no remote command
-		"-E", logPath,                    // SSH writes logs to file directly
-		"-o", "ExitOnForwardFailure=yes", // exit if port forward fails
-		"-o", "ConnectTimeout=10",        // fail fast if host unreachable
-		"-o", "ServerAliveInterval=15",   // keepalive every 15s
-		"-o", "ServerAliveCountMax=3",    // disconnect after 3 missed keepalives
-		"-L", forwardArg,
-		opts.Host,
-	)
+	cmd := exec.Command(sshPath, buildSSHArgs(logPath, forwardArg, opts.Host)...) // nosemgrep: dangerous-exec-command
 	// No Stdout/Stderr — fully detached, SSH logs via -E
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	setSysProcAttr(cmd)
+
+	// Hand the port over as late as possible. Everything up to here has held it
+	// reserved; what remains is the sliver between this close and the child's
+	// own bind(), which ExitOnForwardFailure turns into a clean, logged failure.
+	res.Release()
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("cannot start ssh: %w", err)
@@ -182,9 +201,9 @@ func startSingle(sshPath string, opts *StartOptions, pf PortForward, localPort i
 
 	if !opts.SkipValidation {
 		if err := validateTunnel(pid, localPort, logPath); err != nil {
-			// Try to kill the process if it's still running
+			// Try to kill the process if it's still running (best-effort)
 			if IsProcessAlive(pid) {
-				KillProcess(pid)
+				_ = KillProcess(pid)
 			}
 			return nil, err
 		}
@@ -192,7 +211,7 @@ func startSingle(sshPath string, opts *StartOptions, pf PortForward, localPort i
 		time.Sleep(500 * time.Millisecond)
 		if !IsProcessAlive(pid) {
 			logContent := readLogFile(logPath)
-			return nil, fmt.Errorf("ssh process died immediately. Log:\n%s", logContent)
+			return nil, fmt.Errorf("ssh process died immediately%s. Log:\n%s", bindFailureHint(logContent), logContent)
 		}
 	}
 
@@ -210,7 +229,7 @@ func startSingle(sshPath string, opts *StartOptions, pf PortForward, localPort i
 	statePath := StatePathWithPort(opts.TunnelsDir, opts.Host, opts.Service, pf.Name)
 	if err := SaveState(statePath, state); err != nil {
 		if IsProcessAlive(pid) {
-			KillProcess(pid)
+			_ = KillProcess(pid)
 		}
 		return nil, fmt.Errorf("cannot save tunnel state: %w", err)
 	}
@@ -223,7 +242,7 @@ func validateTunnel(pid int, localPort int, logPath string) error {
 	for time.Now().Before(deadline) {
 		if !IsProcessAlive(pid) {
 			logContent := readLogFile(logPath)
-			return fmt.Errorf("SSH tunnel failed to start. Log:\n%s", logContent)
+			return fmt.Errorf("SSH tunnel failed to start%s. Log:\n%s", bindFailureHint(logContent), logContent)
 		}
 		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", localPort), 500*time.Millisecond)
 		if err == nil {
@@ -236,6 +255,17 @@ func validateTunnel(pid int, localPort int, logPath string) error {
 	// The local port is bound by SSH but net.Dial won't succeed unless something
 	// is listening on the remote end. The tunnel IS working.
 	return nil
+}
+
+// bindFailureHint recognises the one race a reservation cannot close: another
+// process claiming the local port in the instant between sshforward releasing
+// it and ssh calling bind(). Retrying is all the user can do about it.
+func bindFailureHint(log string) string {
+	l := strings.ToLower(log)
+	if strings.Contains(l, "address already in use") || strings.Contains(l, "cannot listen to port") {
+		return " because the local port was taken by another process just before ssh could bind it — retry"
+	}
+	return ""
 }
 
 func readLogFile(path string) string {
@@ -286,13 +316,16 @@ func stopSingle(tunnelsDir string, state *TunnelState) error {
 		if !IsSSHProcess(state.PID) {
 			return RemoveState(statePath)
 		}
-		if err := KillProcess(state.PID); err != nil {
-			return fmt.Errorf("cannot stop process %d: %w", state.PID, err)
+		// Wait for the process to actually go away before dropping the state
+		// file: reporting success while ssh still held the local port would
+		// leave an untracked tunnel behind.
+		if err := TerminateAndWait(state.PID); err != nil {
+			return err
 		}
 	}
 
-	// Clean up log file
-	os.Remove(LogPath(tunnelsDir, state.Host, state.Service, state.PortName))
+	// Clean up log file (best-effort — it may not exist)
+	_ = os.Remove(LogPath(tunnelsDir, state.Host, state.Service, state.PortName))
 
 	return RemoveState(statePath)
 }

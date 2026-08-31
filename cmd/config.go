@@ -6,7 +6,6 @@ import (
 	"sort"
 	"text/tabwriter"
 
-	"github.com/pcpl2/sshforward/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -14,10 +13,10 @@ var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Show current configuration",
 	Args:  cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load()
+	RunE: func(_ *cobra.Command, args []string) error {
+		cfg, err := loadConfig()
 		if err != nil {
-			return fmt.Errorf("config not found. Create ~/.sshforward/config.yaml\n\nExample:\nservices:\n  mysql:\n    remote_port: 3306\n  gitea:\n    remote_host: 10.0.0.5\n    ports:\n      - name: web\n        remote_port: 3000\n      - name: ssh\n        remote_port: 2222")
+			return err
 		}
 
 		names := make([]string, 0, len(cfg.Services))

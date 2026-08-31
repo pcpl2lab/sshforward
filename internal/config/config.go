@@ -48,6 +48,10 @@ type rawConfig struct {
 }
 
 // known top-level keys and service-level keys for unknown field detection
+var knownTopKeys = map[string]bool{
+	"services": true,
+}
+
 var knownServiceKeys = map[string]bool{
 	"remote_host": true,
 	"remote_port": true,
@@ -115,6 +119,9 @@ func LoadFromPath(path string) (*Config, error) {
 			if svc.RemotePort == 0 {
 				return nil, fmt.Errorf("service %q: remote_port is required (or use 'ports' for multi-port)", name)
 			}
+			if err := checkPortRange(svc.RemotePort); err != nil {
+				return nil, fmt.Errorf("service %q: remote_port: %w", name, err)
+			}
 			localPort, err := parseLocalPort(svc.LocalPort, name, "")
 			if err != nil {
 				return nil, err
@@ -161,6 +168,9 @@ func parseMultiPorts(serviceName, defaultRemoteHost string, rawPorts []rawPort) 
 		if rp.RemotePort == 0 {
 			return nil, fmt.Errorf("service %q: port %q: remote_port is required", serviceName, rp.Name)
 		}
+		if err := checkPortRange(rp.RemotePort); err != nil {
+			return nil, fmt.Errorf("service %q: port %q: remote_port: %w", serviceName, rp.Name, err)
+		}
 
 		localPort, err := parseLocalPort(rp.LocalPort, serviceName, rp.Name)
 		if err != nil {
@@ -190,6 +200,16 @@ func parseMultiPorts(serviceName, defaultRemoteHost string, rawPorts []rawPort) 
 	return ports, nil
 }
 
+// checkPortRange rejects TCP port numbers outside 1-65535, so a typo is
+// reported while reading the config instead of surfacing later as a
+// misleading "port is already in use" from net.Listen.
+func checkPortRange(p int) error {
+	if p < 1 || p > 65535 {
+		return fmt.Errorf("%d is out of range: must be 1-65535", p)
+	}
+	return nil
+}
+
 // parseLocalPort parses the local_port value.
 // Returns:
 //
@@ -207,10 +227,16 @@ func parseLocalPort(v interface{}, serviceName, portName string) (int, error) {
 		if val == 0 {
 			return 0, nil // explicit 0 = auto
 		}
+		if err := checkPortRange(val); err != nil {
+			return 0, fmt.Errorf("%s: local_port: %w", ctx, err)
+		}
 		return val, nil
 	case float64:
 		if int(val) == 0 {
 			return 0, nil
+		}
+		if err := checkPortRange(int(val)); err != nil {
+			return 0, fmt.Errorf("%s: local_port: %w", ctx, err)
 		}
 		return int(val), nil
 	case string:
@@ -242,9 +268,20 @@ func checkUnknownFields(data []byte) error {
 		return nil
 	}
 
-	// Find the "services" mapping
+	// Validate top-level keys, then descend into "services"
 	for i := 0; i < len(doc.Content)-1; i += 2 {
-		if doc.Content[i].Value == "services" {
+		key := doc.Content[i].Value
+		if !knownTopKeys[key] {
+			suggestions := suggestKey(key, knownTopKeys)
+			if suggestions != "" {
+				return fmt.Errorf("line %d: unknown top-level field %q (did you mean %s?)",
+					doc.Content[i].Line, key, suggestions)
+			}
+			return fmt.Errorf("line %d: unknown top-level field %q. Valid fields: services",
+				doc.Content[i].Line, key)
+		}
+
+		if key == "services" {
 			servicesNode := doc.Content[i+1]
 			if servicesNode.Kind != yaml.MappingNode {
 				continue

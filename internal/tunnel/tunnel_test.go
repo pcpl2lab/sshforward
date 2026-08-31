@@ -118,22 +118,39 @@ func TestStop_NonExistentTunnel(t *testing.T) {
 	}
 }
 
-func TestStart_AlreadyActive(t *testing.T) {
-	tunnelsDir := t.TempDir()
-	state := &TunnelState{
-		Host: "p1", Service: "mysql", PID: os.Getpid(),
-		LocalPort: 13306, RemoteHost: "127.0.0.1", RemotePort: 3306,
+func TestStart_LiveNonSSHPIDIsStale(t *testing.T) {
+	if _, err := exec.LookPath("ssh"); err != nil {
+		t.Skip("ssh not available, skipping integration test")
 	}
-	SaveState(StatePath(tunnelsDir, "p1", "mysql"), state)
 
-	_, err := Start(&StartOptions{
-		Host: "p1", Service: "mysql",
-		Ports:          []PortForward{{RemoteHost: "127.0.0.1", RemotePort: 3306}},
+	tunnelsDir := t.TempDir()
+	// A PID that is alive but is not ssh: after a reboot or PID wraparound an
+	// unrelated process can inherit a stored PID. That must not block a start.
+	state := &TunnelState{
+		Host: "localhost", Service: "test", PID: os.Getpid(),
+		LocalPort: 13306, RemoteHost: "127.0.0.1", RemotePort: 22,
+	}
+	statePath := StatePath(tunnelsDir, "localhost", "test")
+	if err := SaveState(statePath, state); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	states, err := Start(&StartOptions{
+		Host: "localhost", Service: "test",
+		Ports:          []PortForward{{RemoteHost: "127.0.0.1", RemotePort: 22}},
 		TunnelsDir:     tunnelsDir,
 		SkipValidation: true,
 	})
-	if err == nil {
-		t.Fatal("expected error for already-active tunnel")
+	if err != nil {
+		t.Fatalf("start over a recycled PID should succeed, got: %v", err)
+	}
+	t.Cleanup(func() { _ = Stop(tunnelsDir, "localhost", "test") })
+
+	if len(states) != 1 {
+		t.Fatalf("got %d states, want 1", len(states))
+	}
+	if states[0].PID == os.Getpid() {
+		t.Errorf("state still holds the stale PID %d, want the new ssh PID", states[0].PID)
 	}
 }
 

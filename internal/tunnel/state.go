@@ -45,14 +45,14 @@ func StatePathWithPort(dir, host, service, portName string) string {
 }
 
 func SaveState(path string, state *TunnelState) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return fmt.Errorf("cannot create tunnels directory: %w", err)
 	}
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("cannot marshal state: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("cannot write state file: %w", err)
 	}
 	return nil
