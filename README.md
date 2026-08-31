@@ -9,13 +9,23 @@ Define your services once, connect with a single command.
 
 ## Demo
 
-Scripted walkthroughs (not live recordings) live in [`docs/demo/`](docs/demo).
-Play them locally with [asciinema](https://asciinema.org/):
+### Basic usage
+
+[![asciicast](https://asciinema.org/a/tcPH24PRXLPSDbbh.svg)](https://asciinema.org/a/tcPH24PRXLPSDbbh)
+
+### Multi-port services
+
+[![asciicast](https://asciinema.org/a/5JcEMjjycUDYxeMk.svg)](https://asciinema.org/a/5JcEMjjycUDYxeMk)
+
+### Troubleshooting and error handling
+
+[![asciicast](https://asciinema.org/a/AbQNGHibJTIBxkxA.svg)](https://asciinema.org/a/AbQNGHibJTIBxkxA)
+
+The raw recordings live in [`docs/demo/`](docs/demo) and play offline with
+[asciinema](https://asciinema.org/):
 
 ```bash
 asciinema play docs/demo/demo-basic.cast
-asciinema play docs/demo/demo-multiport.cast
-asciinema play docs/demo/demo-troubleshooting.cast
 ```
 
 ## Features
