@@ -3,6 +3,10 @@ version: 2
 before:
   hooks:
     - go mod tidy
+    # Windows version resource: the .syso files are per-architecture, are not
+    # committed, and carry the release tag, so they are built here rather than
+    # kept in the repo. Every windows goarch below must appear in --arch.
+    - go run github.com/tc-hib/go-winres@v0.3.3 make --arch amd64,arm64 --file-version {{ .Version }} --product-version {{ .Version }}
 
 builds:
   - env:

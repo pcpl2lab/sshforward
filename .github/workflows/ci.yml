@@ -19,6 +19,9 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: go vet ./...
+      # Builds the Windows version resource from winres/winres.json, so a
+      # malformed resource fails here rather than during a release.
+      - run: go generate ./...
       - run: go build ./...
       - run: go test ./... -count=1
 

@@ -1,0 +1,61 @@
+{
+  "RT_GROUP_ICON": {
+    "APP": {
+      "0000": [
+        "icon.png",
+        "icon16.png"
+      ]
+    }
+  },
+  "RT_MANIFEST": {
+    "#1": {
+      "0409": {
+        "identity": {
+          "name": "pcpl2.sshforward",
+          "version": "0.0.0.0"
+        },
+        "description": "SSH port forwarding manager",
+        "minimum-os": "win10",
+        "execution-level": "as invoker",
+        "ui-access": false,
+        "auto-elevate": false,
+        "dpi-awareness": "unaware",
+        "disable-theming": false,
+        "disable-window-filtering": false,
+        "high-resolution-scrolling-aware": false,
+        "ultra-high-resolution-scrolling-aware": false,
+        "long-path-aware": true,
+        "printer-driver-isolation": false,
+        "gdi-scaling": false,
+        "segment-heap": false,
+        "use-common-controls-v6": false
+      }
+    }
+  },
+  "RT_VERSION": {
+    "#1": {
+      "0000": {
+        "fixed": {
+          "file_version": "0.0.0.0",
+          "product_version": "0.0.0.0"
+        },
+        "info": {
+          "0409": {
+            "Comments": "https://github.com/pcpl2/sshforward",
+            "CompanyName": "Patryk Ławicki",
+            "FileDescription": "SSH port forwarding manager",
+            "FileVersion": "",
+            "InternalName": "sshforward",
+            "LegalCopyright": "Copyright (c) 2026 Patryk Ławicki. BSD 2-Clause License.",
+            "LegalTrademarks": "",
+            "OriginalFilename": "sshforward.exe",
+            "PrivateBuild": "",
+            "ProductName": "sshforward",
+            "ProductVersion": "",
+            "SpecialBuild": ""
+          }
+        }
+      }
+    }
+  }
+}

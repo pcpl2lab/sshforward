@@ -43,13 +43,17 @@ a build tag, say in the PR which platforms you actually tested on.
 
 ```
 main.go        # entry point, delegates to cmd
-cmd/           # CLI commands (cobra): start, stop, list, logs, config, edit, version
+cmd/           # CLI commands (cobra): start, stop, list, logs, config, edit,
+               # update, version
 internal/
   config/      # YAML config loading and validation (~/.sshforward/config.yaml)
   sshconfig/   # ~/.ssh/config parsing and host validation
   port/        # local port reservation and discovery
   tunnel/      # start/stop of ssh processes, state files, file locking
                # platform-specific files: *_windows.go, *_unix.go
+  update/      # release lookup, version comparison, install-source detection,
+               # verified self-update
+winres/        # Windows version metadata, icon and application manifest
 docs/demo/     # asciinema walkthroughs
 ```
 
@@ -69,6 +73,29 @@ docs/demo/     # asciinema walkthroughs
   behind a generic message.
 - **Comments explain why**, not what. If a line encodes a platform quirk or a
   race, say which one.
+- **`AssetName` mirrors `.goreleaser.yaml`.** The self-update reconstructs the
+  archive names GoReleaser publishes. Changing the archive `name_template` or
+  its formats without changing `internal/update/apply.go` breaks updates for
+  everyone, and only after a release — `TestAssetName_StaysInSyncWithGoreleaser`
+  fails the build instead.
+- **The self-update verifies before it writes.** Any change to
+  `internal/update/apply.go` must keep the checksum comparison ahead of every
+  filesystem write, and must leave the running binary untouched on failure.
+- **Windows resources come from `winres/winres.json`.** Version metadata, the
+  icon and the application manifest live there. The `rsrc_windows_*.syso` files
+  the compiler consumes are generated, not committed:
+
+  ```bash
+  go generate ./...     # writes rsrc_windows_{amd64,arm64}.syso
+  ```
+
+  Two traps, both guarded by tests in `winres_test.go`:
+  `go-winres` writes the version string table **only when both
+  `--file-version` and `--product-version` are given** — omit them and the
+  binary's Properties dialog comes out completely blank while the resource
+  still looks present; and each `.syso` is per-architecture, so a new Windows
+  `goarch` must be added to the `--arch` list in `.goreleaser.yaml` or that
+  architecture ships with no metadata at all.
 - **Tests use `t.TempDir()`** for isolation and never touch the real
   `~/.sshforward`. Tests that need a working `ssh` skip themselves:
 

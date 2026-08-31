@@ -20,6 +20,8 @@ linters:
         - fmt.Fprintln
         - (*text/tabwriter.Writer).Flush
         - (*os.File).Close
+        - (io.ReadCloser).Close
+        - (*compress/gzip.Reader).Close
         - (net.Listener).Close
         - (net.Conn).Close
         - (*os.Process).Release

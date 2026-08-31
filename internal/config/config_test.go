@@ -442,3 +442,59 @@ func TestLoadConfig_PortRange(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadConfig_UpdateCheck(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want bool
+	}{
+		{
+			name: "absent key leaves the check enabled",
+			yaml: "services:\n  mysql:\n    remote_port: 3306\n",
+			want: true,
+		},
+		{
+			name: "explicitly disabled",
+			yaml: "update_check: false\nservices:\n  mysql:\n    remote_port: 3306\n",
+			want: false,
+		},
+		{
+			name: "explicitly enabled",
+			yaml: "update_check: true\nservices:\n  mysql:\n    remote_port: 3306\n",
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tt.yaml), 0600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+
+			cfg, err := LoadFromPath(path)
+			if err != nil {
+				t.Fatalf("load failed: %v", err)
+			}
+			if cfg.UpdateCheck != tt.want {
+				t.Errorf("got UpdateCheck = %v, want %v", cfg.UpdateCheck, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_UpdateCheckTypoIsSuggested(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("updatecheck: false\nservices:\n  mysql:\n    remote_port: 3306\n"), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := LoadFromPath(path)
+	if err == nil {
+		t.Fatal("got nil error for the misspelled key 'updatecheck', want one")
+	}
+	if !strings.Contains(err.Error(), `did you mean "update_check"`) {
+		t.Errorf("got error %q, want it to suggest update_check", err)
+	}
+}

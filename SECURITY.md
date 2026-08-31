@@ -36,7 +36,8 @@ In scope:
 - escaping the validation applied to hosts, remote hosts and port numbers,
 - permissions of files created under `~/.sshforward/`,
 - secrets leaking into state files, log files or terminal output,
-- weakening of the SSH options sshforward enforces (see below).
+- weakening of the SSH options sshforward enforces (see below),
+- anything letting an unverified binary be installed by `sshforward update`.
 
 Out of scope:
 
@@ -67,6 +68,16 @@ Facts worth knowing before reporting, and worth preserving in any patch:
 - **No credentials handled.** sshforward never reads, stores or forwards keys,
   passphrases or passwords; all authentication is delegated to `ssh` and the
   user's agent.
+- **Network egress.** sshforward makes exactly one kind of outbound request of
+  its own: a release lookup against `api.github.com`, at most once a day, plus
+  the release downloads that `sshforward update` performs. Nothing about the
+  user, their hosts or their config is sent. Disable it entirely with
+  `update_check: false` or `SSHFORWARD_NO_UPDATE_CHECK=1`.
+- **Verified self-update.** `sshforward update` computes the SHA-256 of the
+  downloaded archive and compares it against the release's `checksums.txt`
+  before anything on disk is touched. A mismatch aborts with the running binary
+  untouched. A binary owned by a package manager, or one the current user
+  cannot write, is never replaced.
 - **Logs.** SSH writes its own log through `-E` to
   `~/.sshforward/tunnels/*.log`. Those logs are shown verbatim by `sshforward
   logs` and by `sshforward list` for dead tunnels — treat them as you would any

@@ -25,6 +25,9 @@ type Service struct {
 
 type Config struct {
 	Services map[string]Service `yaml:"services"`
+	// UpdateCheck enables the once-a-day check for a newer release.
+	// Absent from the file means enabled.
+	UpdateCheck bool
 }
 
 // --- raw types for YAML parsing with unknown field detection ---
@@ -45,11 +48,14 @@ type rawService struct {
 
 type rawConfig struct {
 	Services map[string]rawService `yaml:"services"`
+	// A pointer so an absent key can be told apart from an explicit false.
+	UpdateCheck *bool `yaml:"update_check"`
 }
 
 // known top-level keys and service-level keys for unknown field detection
 var knownTopKeys = map[string]bool{
-	"services": true,
+	"services":     true,
+	"update_check": true,
 }
 
 var knownServiceKeys = map[string]bool{
@@ -99,7 +105,8 @@ func LoadFromPath(path string) (*Config, error) {
 	}
 
 	cfg := &Config{
-		Services: make(map[string]Service, len(raw.Services)),
+		Services:    make(map[string]Service, len(raw.Services)),
+		UpdateCheck: raw.UpdateCheck == nil || *raw.UpdateCheck,
 	}
 
 	for name, svc := range raw.Services {
@@ -277,7 +284,7 @@ func checkUnknownFields(data []byte) error {
 				return fmt.Errorf("line %d: unknown top-level field %q (did you mean %s?)",
 					doc.Content[i].Line, key, suggestions)
 			}
-			return fmt.Errorf("line %d: unknown top-level field %q. Valid fields: services",
+			return fmt.Errorf("line %d: unknown top-level field %q. Valid fields: services, update_check",
 				doc.Content[i].Line, key)
 		}
 

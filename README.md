@@ -28,6 +28,8 @@ asciinema play docs/demo/demo-troubleshooting.cast
 - **Config validation** — port ranges are range-checked and typos like `localport`
   are caught with a suggestion
 - **Tunnel monitoring** — list active tunnels, view SSH logs, auto-cleanup dead processes
+- **Update checks** — tells you when a newer release exists, and can install it
+  itself when you did not use a package manager
 - **Cross-platform** — Windows, Linux, macOS
 
 ## Requirements
@@ -131,6 +133,13 @@ Config file location:
 
 The directory is created with `0700` and the config file with `0600`.
 
+### Top-level keys
+
+| Key | Default | Meaning |
+|---|---|---|
+| `services` | — | The service definitions, described below |
+| `update_check` | `true` | Whether to check daily for a newer release |
+
 ### Single-port service
 
 ```yaml
@@ -206,6 +215,8 @@ Error: service "mysql": local_port: 99999 is out of range: must be 1-65535
 | `sshforward logs [<host> <service>]` | View SSH logs for debugging |
 | `sshforward config` | Display loaded configuration |
 | `sshforward edit` | Open the config file in `$VISUAL` / `$EDITOR` |
+| `sshforward update` | Install the newest release, or say how to update |
+| `sshforward update --check` | Report whether a newer release exists, change nothing |
 | `sshforward version` | Print version, commit, build date and os/arch |
 
 Notes:
@@ -220,6 +231,61 @@ Notes:
   string alone.
 - Every command exits `0` on success and `1` on failure, printing a single
   `Error: …` line to stderr.
+
+## Updates
+
+### Checking
+
+Once a day, at most, sshforward asks the GitHub API for the newest release and
+remembers the answer in `~/.sshforward/update-check.json`. When a newer version
+exists, one line goes to **stderr** after the command finishes:
+
+```
+A newer sshforward is available: v1.5.0 (you have v1.4.0). Run 'sshforward update'.
+```
+
+The check runs in the background and is abandoned if the command finishes first,
+so it never delays anything. Every failure is silent: being offline, behind a
+proxy or rate-limited is not something an unrelated command should complain
+about. Development builds never check, and the notice never touches stdout, so
+`list` and `config` stay parsable.
+
+Turn it off permanently in the config:
+
+```yaml
+update_check: false
+```
+
+or per invocation with `SSHFORWARD_NO_UPDATE_CHECK=1`. `GITHUB_TOKEN`, if set,
+is used to raise the anonymous rate limit — useful behind a shared office IP.
+
+### Updating
+
+```bash
+sshforward update           # install the newest release
+sshforward update --check   # report only, change nothing
+```
+
+When a package manager installed sshforward, `update` refuses to touch the
+binary and prints that manager's own command instead — overwriting a file
+`apt`, `brew`, `scoop` or `winget` owns breaks its manifest and is undone by the
+next upgrade:
+
+```
+$ sshforward update
+A newer release is available: v1.5.0 (you have v1.4.0)
+
+This copy was installed with homebrew. Update it with:
+  brew upgrade sshforward
+```
+
+Otherwise sshforward downloads the release archive for your platform, **verifies
+it against the release's `checksums.txt`**, and replaces its own binary through
+renames. A digest that does not match aborts the update with the original binary
+untouched. Detection is by path, so it can be wrong; two things keep that safe:
+a binary the current user cannot write is never replaced, and
+`SSHFORWARD_INSTALL_SOURCE` (`homebrew`, `scoop`, `winget`, `deb`, `manual`)
+overrides the guess outright.
 
 ## How It Works
 
@@ -242,6 +308,7 @@ All under `~/.sshforward/` (`%USERPROFILE%\.sshforward\` on Windows):
 | `tunnels/<host>-<service>[-<port>].json`     | Tunnel state (PID, ports, started at)   |
 | `tunnels/<host>-<service>[-<port>].log`      | SSH stderr, written by `ssh -E`         |
 | `tunnels/<host>-<service>[-<port>].lock`     | Lock held during start/stop             |
+| `update-check.json`                          | Last release lookup, refreshed daily    |
 
 ### Process handling
 
@@ -320,11 +387,18 @@ such process exists, remove the stale
 ## Development
 
 ```bash
+go generate ./...               # Windows version resource (see winres/)
 go build -o sshforward .        # build
 go test ./... -count=1          # tests (SSH-dependent tests skip without ssh)
 go vet ./...                    # static analysis
 golangci-lint run ./...         # lint (v2.13.2, see .golangci.yml)
 ```
+
+On Windows the binary carries a full version resource — product name,
+description, company, copyright and version — plus an icon and an application
+manifest declaring `asInvoker` (so it never triggers a UAC prompt) and long-path
+awareness. It is built from `winres/winres.json`; release builds get the real
+tag, local builds are stamped `0.0.0.0`.
 
 CI runs build, vet and tests on Linux, macOS and Windows, plus a lint job; see
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml). The Go version is taken
