@@ -7,6 +7,7 @@ on:
 
 jobs:
   test:
+    name: Tests
     strategy:
       fail-fast: false
       matrix:
@@ -26,6 +27,7 @@ jobs:
       - run: go test ./... -count=1
 
   lint:
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
@@ -39,6 +41,7 @@ jobs:
   # Compiles the Inno Setup script on every push. Without this the installer is
   # only ever built during a release, where a typo in the script costs a tag.
   installer:
+    name: Windows installer
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7.0.1

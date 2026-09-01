@@ -78,18 +78,21 @@ cp "$work/$KEYNAME.pub" "$KEYNAME.pub"
 rm -rf "$work"
 
 echo "==> writing the cache policy"
-# An index that lists packages already replaced is how apk ends up fetching a
-# file that is no longer there. Package filenames carry the version.
-cat >_headers <<'HEADERS'
-/*/APKINDEX.tar.gz
-  Cache-Control: no-cache
-
-/*/*.apk
-  Cache-Control: public, max-age=31536000, immutable
-
-/pcpl2lab.rsa.pub
-  Cache-Control: public, max-age=3600
-HEADERS
+# A cached index keeps a new release invisible to apk until it expires.
+#
+# The rules are written out one architecture at a time, as literal paths.
+# Cloudflare allows only one splat per pattern and matches it greedily, so
+# neither "/*/APKINDEX.tar.gz" nor "/*/*.apk" matches anything here - and a
+# rule that never fires looks exactly like a rule that works.
+#
+# Package files are left on the default policy: their names carry the version,
+# they never change, and the default revalidates rather than serving blind.
+{
+	for arch in $arches; do
+		printf '/%s/APKINDEX.tar.gz\n  Cache-Control: no-cache\n\n' "$arch"
+	done
+	printf '/%s.pub\n  Cache-Control: public, max-age=3600\n' "$KEYNAME"
+} >_headers
 
 echo "==> writing the instructions page"
 cat >index.html <<HTML

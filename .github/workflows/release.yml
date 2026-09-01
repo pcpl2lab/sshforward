@@ -1,5 +1,9 @@
 name: Release
 
+# Shown as the run's title in the Actions list, which otherwise reads as a
+# column of identical "Release" entries with no way to tell the versions apart.
+run-name: Release ${{ inputs.version }}${{ inputs.draft && ' (draft)' || '' }}
+
 # Releases are cut on demand. The tag is created here and GoReleaser publishes
 # everything from it: the GitHub release with all artifacts, the Homebrew cask
 # and the Scoop manifest.
@@ -31,6 +35,7 @@ concurrency:
 
 jobs:
   release:
+    name: Build and publish
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
@@ -109,6 +114,25 @@ jobs:
           SCOOP_BUCKET_DEPLOY_KEY: ${{ secrets.SCOOP_BUCKET_DEPLOY_KEY }}
           WINGET_FORK_DEPLOY_KEY: ${{ secrets.WINGET_FORK_DEPLOY_KEY }}
 
+      # The run page otherwise says nothing about where any of this ended up.
+      - name: Summarise what was published
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          {
+            echo "## sshforward $VERSION"
+            echo
+            echo "| Channel | Where |"
+            echo "| --- | --- |"
+            echo "| Release | [$VERSION](https://github.com/$GITHUB_REPOSITORY/releases/tag/$VERSION) |"
+            echo "| Homebrew | pcpl2lab/homebrew-tap |"
+            echo "| Scoop | pcpl2lab/scoop-bucket |"
+            echo "| WinGet | pcpl2lab/winget-pkgs, branch \`sshforward-${VERSION#v}\` |"
+            echo
+            echo "**Manual step:** open the pull request from that WinGet branch to"
+            echo "microsoft/winget-pkgs. A deploy key cannot open it."
+          } >>"$GITHUB_STEP_SUMMARY"
+
       # A tag with no release behind it would have to be deleted by hand before
       # the version could be retried.
       - name: Remove the tag if the release did not complete
@@ -121,6 +145,7 @@ jobs:
   # from the release, rather than a rebuild that would carry a different build
   # date and never be covered by checksums.txt.
   installer:
+    name: Windows installer
     needs: release
     runs-on: windows-latest
     steps:
@@ -160,12 +185,15 @@ jobs:
         run: |
           gh release upload $env:VERSION $env:SETUP_EXE --repo $env:GITHUB_REPOSITORY --clobber
           if ($LASTEXITCODE -ne 0) { throw "upload failed" }
+          "- Windows installer: ``$(Split-Path $env:SETUP_EXE -Leaf)``" |
+            Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
   # A macOS installer package. GoReleaser's pkg support is Pro-only, but
   # pkgbuild and productbuild ship with macOS, so this needs no dependencies.
   # A .pkg installs straight into /usr/local/bin, which is on the default PATH -
   # a .dmg would only hand the user a file to copy somewhere themselves.
   macos-pkg:
+    name: macOS package
     needs: release
     runs-on: macos-latest
     steps:
@@ -220,13 +248,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ inputs.version }}
-        run: gh release upload "$VERSION" "$PKG" --repo "$GITHUB_REPOSITORY" --clobber
+        run: |
+          set -eu
+          gh release upload "$VERSION" "$PKG" --repo "$GITHUB_REPOSITORY" --clobber
+          echo "- macOS package: \`$(basename "$PKG")\`" >>"$GITHUB_STEP_SUMMARY"
 
   # Publishes the .deb packages to the APT repository on GitHub Pages, so
   # Debian and Ubuntu users get `apt upgrade` rather than a manual download.
   # GoReleaser has no APT publisher in the OSS edition; this signs and pushes
   # the repository itself.
   apt:
+    name: APT repository
     needs: release
     runs-on: ubuntu-latest
     steps:
@@ -305,10 +337,12 @@ jobs:
           fi
           git commit -m "sshforward $VERSION"
           git push origin main
+          echo "- APT repository: https://apt.pcpl2lab.ovh" >>"$GITHUB_STEP_SUMMARY"
 
   # The RPM repository, for dnf and zypper. Packages are already signed by nfpm;
   # this signs the metadata as well, so clients can run with repo_gpgcheck=1.
   rpm:
+    name: RPM repository
     needs: release
     runs-on: ubuntu-latest
     steps:
@@ -372,10 +406,12 @@ jobs:
           git diff --cached --quiet && { echo "nothing changed"; exit 0; }
           git commit -m "sshforward $VERSION"
           git push origin main
+          echo "- RPM repository: https://rpm.pcpl2lab.ovh" >>"$GITHUB_STEP_SUMMARY"
 
   # The Alpine repository. Indexing and signing need apk-tools and abuild-sign,
   # which exist only on Alpine, so that part runs in a container.
   apk:
+    name: Alpine repository
     needs: release
     runs-on: ubuntu-latest
     steps:
@@ -436,3 +472,4 @@ jobs:
           git diff --cached --quiet && { echo "nothing changed"; exit 0; }
           git commit -m "sshforward $VERSION"
           git push origin main
+          echo "- Alpine repository: https://apk.pcpl2lab.ovh" >>"$GITHUB_STEP_SUMMARY"

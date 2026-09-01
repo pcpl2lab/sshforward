@@ -11,6 +11,23 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// publishScripts are the repository publishers, which share both their shape
+// and the ways they can go quietly wrong.
+var publishScripts = []string{
+	"installer/apt/publish.sh",
+	"installer/rpm/publish.sh",
+	"installer/apk/publish.sh",
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(data)
+}
+
 const issPath = "installer/sshforward.iss"
 
 // appID is the Inno Setup AppId of the Windows installer. Windows recognises an
@@ -151,55 +168,89 @@ func TestMacOSInstallerShipsAUniversalBinary(t *testing.T) {
 
 func TestRepositoryCachePolicies(t *testing.T) {
 	// Every repository is served by Cloudflare Pages, which caches at the edge.
-	// A stale index served next to freshly published packages is what produces
-	// apt's "Hash Sum mismatch" and its equivalents in dnf and apk. Package
-	// filenames carry the version, so those are safe to cache forever.
+	// A cached index served next to freshly published packages is what produces
+	// apt's "Hash Sum mismatch" and keeps a new release invisible to dnf and apk.
 	tests := []struct {
 		script string
 		index  string
 	}{
 		{script: "installer/apt/publish.sh", index: "/dists/*"},
 		{script: "installer/rpm/publish.sh", index: "/repodata/*"},
-		{script: "installer/apk/publish.sh", index: "/*/APKINDEX.tar.gz"},
+		{script: "installer/apk/publish.sh", index: "/%s/APKINDEX.tar.gz"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.script, func(t *testing.T) {
-			data, err := os.ReadFile(tt.script)
-			if err != nil {
-				t.Fatalf("read %s: %v", tt.script, err)
-			}
+			// Some rules are written with a heredoc and some with printf, so
+			// unescape the printf newlines to read both the same way.
+			body := strings.ReplaceAll(readFile(t, tt.script), `\n`, "\n")
 
-			_, headers, found := strings.Cut(string(data), "cat >_headers")
-			if !found {
+			if !strings.Contains(body, ">_headers") {
 				t.Fatalf("%s writes no _headers file, so Cloudflare's default caching applies to the index", tt.script)
 			}
 
-			_, afterIndex, found := strings.Cut(headers, tt.index)
+			_, afterIndex, found := strings.Cut(body, tt.index)
 			if !found {
-				t.Fatalf("_headers has no rule for %s", tt.index)
+				t.Fatalf("%s has no cache rule mentioning %s", tt.script, tt.index)
 			}
 			rule, _, _ := strings.Cut(strings.TrimLeft(afterIndex, "\n"), "\n\n")
 			if !strings.Contains(rule, "no-cache") {
-				t.Errorf("%s is not marked no-cache, so a cached index would break clients after a release; got %q", tt.index, rule)
+				t.Errorf("the index rule for %s is not no-cache; got %q", tt.index, rule)
 			}
 		})
+	}
+}
+
+func TestCacheRulePatternsCanActuallyMatch(t *testing.T) {
+	// Cloudflare allows one splat per pattern and matches it greedily, so a
+	// pattern like "/*/APKINDEX.tar.gz" or "/*/*.apk" matches nothing at all.
+	// A rule that never fires is indistinguishable from one that works, which
+	// is how a four-hour cache once ended up on an index meant to be no-cache.
+	for _, script := range publishScripts {
+		// Unescape printf newlines so a rule built with printf reads the same
+		// as one written in a heredoc.
+		lines := strings.Split(strings.ReplaceAll(readFile(t, script), `\n`, "\n"), "\n")
+
+		checked := 0
+		for i, line := range lines {
+			// A rule is a path followed by an indented header line. Looking for
+			// that pair is what keeps unrelated paths in the script out of this.
+			if i+1 >= len(lines) || !strings.Contains(lines[i+1], "Cache-Control:") {
+				continue
+			}
+			// Drop any shell prefix, so `printf '/a/*` reads as `/a/*`.
+			p := line
+			if _, after, found := strings.Cut(p, "'"); found {
+				p = after
+			}
+			p = strings.TrimSpace(p)
+			if !strings.HasPrefix(p, "/") {
+				continue
+			}
+			checked++
+
+			if !strings.Contains(p, "*") {
+				continue
+			}
+			if strings.Count(p, "*") > 1 {
+				t.Errorf("%s: pattern %q has more than one splat, which Cloudflare rejects outright", script, p)
+			}
+			if !strings.HasSuffix(p, "*") {
+				t.Errorf("%s: pattern %q puts a splat before the end, which silently matches nothing", script, p)
+			}
+		}
+
+		if checked == 0 {
+			t.Errorf("%s: found no cache rules to check, so this guard is not actually guarding anything", script)
+		}
 	}
 }
 
 func TestEveryRepositoryPublisherSignsItsIndex(t *testing.T) {
 	// An unsigned index means clients must be told to disable verification,
 	// which defeats signing the packages in the first place.
-	for _, script := range []string{
-		"installer/apt/publish.sh",
-		"installer/rpm/publish.sh",
-		"installer/apk/publish.sh",
-	} {
-		data, err := os.ReadFile(script)
-		if err != nil {
-			t.Fatalf("read %s: %v", script, err)
-		}
-		body := string(data)
+	for _, script := range publishScripts {
+		body := readFile(t, script)
 		// APT and RPM sign with PGP; Alpine uses RSA through abuild-sign.
 		if !strings.Contains(body, "gpg --batch") && !strings.Contains(body, "abuild-sign") {
 			t.Errorf("%s never signs anything", script)
