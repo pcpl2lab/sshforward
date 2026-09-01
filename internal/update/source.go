@@ -64,12 +64,43 @@ func (s Source) UpgradeCommand() string {
 	case SourceWinGet:
 		return "winget upgrade sshforward"
 	case SourceSystemPackage:
-		return "sudo apt update && sudo apt upgrade sshforward"
+		return systemUpgradeCommand()
 	case SourceInstaller:
 		return "download and run the latest installer from " + ReleasesURL
 	default:
 		return ""
 	}
+}
+
+// systemPackageManagers pairs a package manager's binary with the command that
+// upgrades one of its packages, in probe order.
+var systemPackageManagers = []struct {
+	binary  string
+	command string
+}{
+	{"/usr/bin/apt", "sudo apt update && sudo apt upgrade sshforward"},
+	{"/usr/bin/dnf", "sudo dnf upgrade sshforward"},
+	{"/usr/bin/zypper", "sudo zypper update sshforward"},
+	{"/usr/bin/yum", "sudo yum update sshforward"},
+	{"/sbin/apk", "sudo apk add --upgrade sshforward"},
+	{"/usr/bin/apk", "sudo apk add --upgrade sshforward"},
+}
+
+// systemUpgradeCommand returns the upgrade command for this system's package
+// manager. The deb, rpm and apk packages all install to /usr/bin, so the path
+// says nothing about which one it was - but the tooling present does, and
+// naming the wrong tool is worse than naming none.
+func systemUpgradeCommand() string {
+	return systemUpgradeCommandFrom(fileExists)
+}
+
+func systemUpgradeCommandFrom(exists func(string) bool) string {
+	for _, m := range systemPackageManagers {
+		if exists(m.binary) {
+			return m.command
+		}
+	}
+	return "your distribution's package manager"
 }
 
 // ParseSource reads a Source from the name used by SourceEnv.

@@ -114,20 +114,43 @@ sudo apt install sshforward
 
 Built for `amd64`, `arm64`, `armhf` and `i386`.
 
-### Linux — single package
+### Linux — RPM repository
 
-For other distributions, download the `.rpm` or `.apk` for your architecture
-from the [Releases](https://github.com/pcpl2lab/sshforward/releases) page:
+Fedora and RHEL:
 
 ```bash
-sudo dnf install ./sshforward-1.0.0-1.x86_64.rpm  # Fedora, RHEL
-sudo apk add --allow-untrusted ./sshforward_1.0.0_x86_64.apk
+sudo curl -fsSL -o /etc/yum.repos.d/pcpl2lab.repo https://rpm.pcpl2lab.ovh/pcpl2lab.repo
+sudo dnf install sshforward
 ```
 
-The packages install to `/usr/bin/sshforward` and depend on the OpenSSH client.
+openSUSE:
 
-Homebrew on Linux is not an option here: Homebrew serves this project as a
-cask, and casks install only on macOS.
+```bash
+sudo zypper addrepo -f https://rpm.pcpl2lab.ovh pcpl2lab
+sudo zypper install sshforward
+```
+
+Packages and repository metadata are both signed, so this works with
+`gpgcheck=1` and `repo_gpgcheck=1`.
+
+### Linux — Alpine repository
+
+```sh
+curl -fsSL https://apk.pcpl2lab.ovh/pcpl2lab.rsa.pub |
+  sudo tee /etc/apk/keys/pcpl2lab.rsa.pub >/dev/null
+
+echo "https://apk.pcpl2lab.ovh" | sudo tee -a /etc/apk/repositories
+
+sudo apk update
+sudo apk add sshforward
+```
+
+Alpine signs with RSA rather than PGP, which is why this key differs from the
+one used by the APT and RPM repositories.
+
+All Linux packages install to `/usr/bin/sshforward` and depend on the OpenSSH
+client. Homebrew on Linux is not an option here: Homebrew serves this project as
+a cask, and casks install only on macOS.
 
 ### Prebuilt binaries
 

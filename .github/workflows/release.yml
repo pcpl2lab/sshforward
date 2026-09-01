@@ -75,6 +75,27 @@ jobs:
           git tag -a "$VERSION" -m "$VERSION"
           git push origin "$VERSION"
 
+      # nfpm signs the packages as it builds them, and it reads the keys from
+      # files rather than the environment.
+      - name: Stage the package signing keys
+        env:
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          APK_RSA_PRIVATE_KEY: ${{ secrets.APK_RSA_PRIVATE_KEY }}
+        run: |
+          set -eu
+          umask 077
+          mkdir -p "$RUNNER_TEMP/keys"
+          printf '%s\n' "$APT_GPG_PRIVATE_KEY" >"$RUNNER_TEMP/keys/gpg.asc"
+          printf '%s\n' "$APK_RSA_PRIVATE_KEY" >"$RUNNER_TEMP/keys/apk.pem"
+          # Alpine signs with RSA, not PGP; a swapped pair of secrets would
+          # otherwise only surface as an unhelpful nfpm error.
+          grep -q 'BEGIN PGP PRIVATE KEY' "$RUNNER_TEMP/keys/gpg.asc" ||
+            { echo "::error::APT_GPG_PRIVATE_KEY is not an armored PGP private key"; exit 1; }
+          grep -q 'BEGIN.*PRIVATE KEY' "$RUNNER_TEMP/keys/apk.pem" ||
+            { echo "::error::APK_RSA_PRIVATE_KEY is not a PEM private key"; exit 1; }
+          echo "GPG_KEY_FILE=$RUNNER_TEMP/keys/gpg.asc" >>"$GITHUB_ENV"
+          echo "APK_KEY_FILE=$RUNNER_TEMP/keys/apk.pem" >>"$GITHUB_ENV"
+
       - uses: goreleaser/goreleaser-action@v7.2.3
         with:
           version: "~> v2"
@@ -273,10 +294,145 @@ jobs:
           cd aptrepo
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # An empty repository clones onto a branch whose name depends on the
+          # git version and the runner's init.defaultBranch, so name it here
+          # rather than letting a "master" appear where Pages expects "main".
+          git checkout -B main
           git add -A
           if git diff --cached --quiet; then
             echo "nothing changed"
             exit 0
           fi
           git commit -m "sshforward $VERSION"
-          git push origin HEAD
+          git push origin main
+
+  # The RPM repository, for dnf and zypper. Packages are already signed by nfpm;
+  # this signs the metadata as well, so clients can run with repo_gpgcheck=1.
+  rpm:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Fetch the released packages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          mkdir -p rpms
+          gh release download "$VERSION" --repo "$GITHUB_REPOSITORY" --pattern '*.rpm' --dir rpms
+          ls -l rpms
+
+      - name: Check out the RPM repository
+        env:
+          RPM_REPO_DEPLOY_KEY: ${{ secrets.RPM_REPO_DEPLOY_KEY }}
+        run: |
+          set -eu
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$RPM_REPO_DEPLOY_KEY" >~/.ssh/rpm_key
+          export GIT_SSH_COMMAND='ssh -i ~/.ssh/rpm_key -o StrictHostKeyChecking=accept-new -F /dev/null'
+          echo "GIT_SSH_COMMAND=$GIT_SSH_COMMAND" >>"$GITHUB_ENV"
+          git clone git@github.com:pcpl2lab/rpm.git rpmrepo
+
+      - name: Import the signing key
+        env:
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+        run: |
+          set -eu
+          printf '%s\n' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+          count=$(gpg --list-secret-keys --with-colons | grep -c '^sec:' || true)
+          if [ "$count" -ne 1 ]; then
+            echo "::error::APT_GPG_PRIVATE_KEY must hold exactly one secret key, found $count"
+            exit 1
+          fi
+
+      - name: Rebuild and sign the repository
+        env:
+          RPM_DIR: ${{ github.workspace }}/rpms
+          RPM_URL: https://rpm.pcpl2lab.ovh
+        run: |
+          set -eu
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq createrepo-c
+          cd rpmrepo
+          bash "$GITHUB_WORKSPACE/installer/rpm/publish.sh"
+
+      - name: Publish
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          cd rpmrepo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B main
+          git add -A
+          git diff --cached --quiet && { echo "nothing changed"; exit 0; }
+          git commit -m "sshforward $VERSION"
+          git push origin main
+
+  # The Alpine repository. Indexing and signing need apk-tools and abuild-sign,
+  # which exist only on Alpine, so that part runs in a container.
+  apk:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Fetch the released packages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          mkdir -p apks
+          gh release download "$VERSION" --repo "$GITHUB_REPOSITORY" --pattern '*.apk' --dir apks
+          ls -l apks
+
+      - name: Check out the Alpine repository
+        env:
+          APK_REPO_DEPLOY_KEY: ${{ secrets.APK_REPO_DEPLOY_KEY }}
+        run: |
+          set -eu
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$APK_REPO_DEPLOY_KEY" >~/.ssh/apk_key
+          export GIT_SSH_COMMAND='ssh -i ~/.ssh/apk_key -o StrictHostKeyChecking=accept-new -F /dev/null'
+          echo "GIT_SSH_COMMAND=$GIT_SSH_COMMAND" >>"$GITHUB_ENV"
+          git clone git@github.com:pcpl2lab/apk.git apkrepo
+
+      - name: Rebuild and sign the repository
+        env:
+          APK_RSA_PRIVATE_KEY: ${{ secrets.APK_RSA_PRIVATE_KEY }}
+        run: |
+          set -eu
+          umask 077
+          mkdir -p "$RUNNER_TEMP/keys"
+          printf '%s\n' "$APK_RSA_PRIVATE_KEY" >"$RUNNER_TEMP/keys/apk.pem"
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/src:ro" \
+            -v "$GITHUB_WORKSPACE/apks:/pkgs:ro" \
+            -v "$RUNNER_TEMP/keys:/keys:ro" \
+            -v "$GITHUB_WORKSPACE/apkrepo:/repo" \
+            -e APK_DIR=/pkgs \
+            -e APK_URL=https://apk.pcpl2lab.ovh \
+            -e APK_KEY_FILE=/keys/apk.pem \
+            alpine:latest sh -c 'apk add --no-cache abuild openssl >/dev/null && cd /repo && sh /src/installer/apk/publish.sh'
+          # The container writes as root; hand the tree back to the runner.
+          sudo chown -R "$(id -u):$(id -g)" apkrepo
+
+      - name: Publish
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          cd apkrepo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B main
+          git add -A
+          git diff --cached --quiet && { echo "nothing changed"; exit 0; }
+          git commit -m "sshforward $VERSION"
+          git push origin main

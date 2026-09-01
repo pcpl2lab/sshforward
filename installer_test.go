@@ -149,29 +149,60 @@ func TestMacOSInstallerShipsAUniversalBinary(t *testing.T) {
 	}
 }
 
-func TestAptRepositoryCachePolicy(t *testing.T) {
-	// Cloudflare Pages caches at the edge. A stale Release served next to a
-	// fresh Packages is precisely what makes apt report "Hash Sum mismatch",
-	// so the index must never be cached while the pool - whose filenames carry
-	// the version - safely can be.
-	data, err := os.ReadFile("installer/apt/publish.sh")
-	if err != nil {
-		t.Fatalf("read publish.sh: %v", err)
-	}
-	script := string(data)
-
-	_, headers, found := strings.Cut(script, "cat >_headers")
-	if !found {
-		t.Fatal("publish.sh writes no _headers file, so Cloudflare's default caching applies to the index")
+func TestRepositoryCachePolicies(t *testing.T) {
+	// Every repository is served by Cloudflare Pages, which caches at the edge.
+	// A stale index served next to freshly published packages is what produces
+	// apt's "Hash Sum mismatch" and its equivalents in dnf and apk. Package
+	// filenames carry the version, so those are safe to cache forever.
+	tests := []struct {
+		script string
+		index  string
+	}{
+		{script: "installer/apt/publish.sh", index: "/dists/*"},
+		{script: "installer/rpm/publish.sh", index: "/repodata/*"},
+		{script: "installer/apk/publish.sh", index: "/*/APKINDEX.tar.gz"},
 	}
 
-	_, afterDists, found := strings.Cut(headers, "/dists/*")
-	if !found {
-		t.Fatal("_headers has no rule for /dists/*")
+	for _, tt := range tests {
+		t.Run(tt.script, func(t *testing.T) {
+			data, err := os.ReadFile(tt.script)
+			if err != nil {
+				t.Fatalf("read %s: %v", tt.script, err)
+			}
+
+			_, headers, found := strings.Cut(string(data), "cat >_headers")
+			if !found {
+				t.Fatalf("%s writes no _headers file, so Cloudflare's default caching applies to the index", tt.script)
+			}
+
+			_, afterIndex, found := strings.Cut(headers, tt.index)
+			if !found {
+				t.Fatalf("_headers has no rule for %s", tt.index)
+			}
+			rule, _, _ := strings.Cut(strings.TrimLeft(afterIndex, "\n"), "\n\n")
+			if !strings.Contains(rule, "no-cache") {
+				t.Errorf("%s is not marked no-cache, so a cached index would break clients after a release; got %q", tt.index, rule)
+			}
+		})
 	}
-	// The directive follows the pattern on the next indented line.
-	rule, _, _ := strings.Cut(strings.TrimLeft(afterDists, "\n"), "\n\n")
-	if !strings.Contains(rule, "no-cache") {
-		t.Errorf("/dists/* is not marked no-cache, so a cached index would break apt after a release; got %q", rule)
+}
+
+func TestEveryRepositoryPublisherSignsItsIndex(t *testing.T) {
+	// An unsigned index means clients must be told to disable verification,
+	// which defeats signing the packages in the first place.
+	for _, script := range []string{
+		"installer/apt/publish.sh",
+		"installer/rpm/publish.sh",
+		"installer/apk/publish.sh",
+	} {
+		data, err := os.ReadFile(script)
+		if err != nil {
+			t.Fatalf("read %s: %v", script, err)
+		}
+		body := string(data)
+		// APT and RPM sign with PGP; Alpine uses RSA through abuild-sign.
+		if !strings.Contains(body, "gpg --batch") && !strings.Contains(body, "abuild-sign") {
+			t.Errorf("%s never signs anything", script)
+		}
 	}
 }

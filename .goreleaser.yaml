@@ -113,7 +113,9 @@ winget:
 
 nfpms:
   - formats: [deb, rpm, apk]
-    maintainer: "Patryk Ławicki"
+    # Debian tooling expects an address here, and nfpm derives the apk key name
+    # from it when one is not given explicitly.
+    maintainer: "Patryk Ławicki <apt@pcpl2lab.ovh>"
     description: "SSH port forwarding manager"
     license: BSD-2-Clause
     homepage: "https://github.com/pcpl2lab/sshforward"
@@ -127,6 +129,20 @@ nfpms:
       rpm:
         dependencies:
           - openssh-clients
+
+    # Packages are signed as they are built, so dnf can run with gpgcheck=1 and
+    # apk without --allow-untrusted. Re-signing a finished package later is both
+    # more fragile and easy to forget.
+    rpm:
+      signature:
+        # The same PGP key that signs the APT repository metadata.
+        key_file: "{{ .Env.GPG_KEY_FILE }}"
+    apk:
+      signature:
+        # Alpine does not use PGP: this is an RSA private key in PEM form, and
+        # key_name must match the filename users drop into /etc/apk/keys.
+        key_file: "{{ .Env.APK_KEY_FILE }}"
+        key_name: pcpl2lab.rsa.pub
 
 changelog:
   sort: asc

@@ -3,6 +3,8 @@ package update
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -228,5 +230,44 @@ func TestDetectSourceForExecutable_MacOSPackageReceipt(t *testing.T) {
 	// The receipt is a macOS concept and must not leak into other platforms.
 	if got := detectSourceForExecutable(installed, "linux"); got != SourceManual {
 		t.Errorf("on linux, got %v, want %v", got, SourceManual)
+	}
+}
+
+func TestSystemUpgradeCommandMatchesTheDistribution(t *testing.T) {
+	// The deb, rpm and apk packages all install to /usr/bin, so the path cannot
+	// tell them apart. Telling a Fedora user to run apt is worse than useless.
+	tests := []struct {
+		name    string
+		present []string
+		want    string
+	}{
+		{name: "debian", present: []string{"/usr/bin/apt"}, want: "apt"},
+		{name: "fedora", present: []string{"/usr/bin/dnf", "/usr/bin/rpm"}, want: "dnf"},
+		{name: "opensuse", present: []string{"/usr/bin/zypper"}, want: "zypper"},
+		{name: "old rhel", present: []string{"/usr/bin/yum"}, want: "yum"},
+		{name: "alpine", present: []string{"/sbin/apk"}, want: "apk"},
+		{name: "nothing recognised", present: nil, want: "package manager"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exists := func(path string) bool { return slices.Contains(tt.present, path) }
+			got := systemUpgradeCommandFrom(exists)
+			if !strings.Contains(got, tt.want) {
+				t.Errorf("got %q, want it to mention %q", got, tt.want)
+			}
+			// Whatever we print, it must never advise the wrong tool.
+			for _, other := range []string{"apt", "dnf", "zypper", "yum", "apk"} {
+				if other != tt.want && strings.Contains(got, other+" ") {
+					t.Errorf("got %q, which advises %q on a %s system", got, other, tt.name)
+				}
+			}
+		})
+	}
+}
+
+func TestSourceSystemPackageAdvisesSomething(t *testing.T) {
+	if SourceSystemPackage.UpgradeCommand() == "" {
+		t.Error("a system package install must still be told how to upgrade")
 	}
 }
