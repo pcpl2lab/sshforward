@@ -14,7 +14,7 @@ import (
 const DefaultBaseURL = "https://api.github.com"
 
 // Repo is the repository releases are read from, in "owner/name" form.
-const Repo = "pcpl2/sshforward"
+const Repo = "pcpl2lab/sshforward"
 
 // maxBodySize caps how much of a response we are willing to read. A release
 // payload is a few kilobytes; anything larger is a misdirected request.

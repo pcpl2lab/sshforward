@@ -16,8 +16,11 @@ import (
 const stillActive = 259
 
 func IsProcessAlive(pid int) bool {
-	if pid <= 0 || pid > math.MaxUint32 {
-		return false // state files are user-editable; reject PIDs outside DWORD range
+	// State files are user-editable, so reject PIDs outside the DWORD range that
+	// OpenProcess takes. The uint64 conversion is what makes this compile on
+	// 386, where int is 32 bits and cannot be compared to MaxUint32 directly.
+	if pid <= 0 || uint64(pid) > math.MaxUint32 {
+		return false
 	}
 	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
 	if err != nil {
@@ -36,7 +39,7 @@ func IsProcessAlive(pid int) bool {
 }
 
 func IsSSHProcess(pid int) bool {
-	if pid <= 0 || pid > math.MaxUint32 {
+	if pid <= 0 || uint64(pid) > math.MaxUint32 {
 		return false
 	}
 	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))

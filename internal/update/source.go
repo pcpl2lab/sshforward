@@ -24,6 +24,11 @@ const (
 	SourceScoop
 	SourceWinGet
 	SourceSystemPackage
+	// SourceInstaller is a copy placed by the Windows installer. It lives in a
+	// user-writable directory, so self-update could overwrite it - but that
+	// would leave the uninstall entry advertising the old version, and the next
+	// run of the installer would undo it anyway.
+	SourceInstaller
 )
 
 func (s Source) String() string {
@@ -36,6 +41,8 @@ func (s Source) String() string {
 		return "winget"
 	case SourceSystemPackage:
 		return "system package"
+	case SourceInstaller:
+		return "the Windows installer"
 	default:
 		return "manual"
 	}
@@ -58,6 +65,8 @@ func (s Source) UpgradeCommand() string {
 		return "winget upgrade sshforward"
 	case SourceSystemPackage:
 		return "sudo apt update && sudo apt upgrade sshforward"
+	case SourceInstaller:
+		return "download and run the latest installer from " + ReleasesURL
 	default:
 		return ""
 	}
@@ -74,6 +83,8 @@ func ParseSource(s string) (Source, bool) {
 		return SourceWinGet, true
 	case "deb", "apt", "rpm", "system":
 		return SourceSystemPackage, true
+	case "installer", "innosetup":
+		return SourceInstaller, true
 	case "manual":
 		return SourceManual, true
 	default:
@@ -94,7 +105,59 @@ func DetectSource() Source {
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = resolved
 	}
-	return detectSourceForPath(exe, runtime.GOOS)
+	return detectSourceForExecutable(exe, runtime.GOOS)
+}
+
+// MacOSPackageID is the identifier of the macOS installer package. It must
+// match the one productbuild is given in the release workflow, or an installed
+// package goes unrecognised.
+const MacOSPackageID = "ovh.pcpl2lab.sshforward"
+
+// macOSInstallDir is where the package puts the binary. It is on the default
+// PATH, which is why the package uses it.
+const macOSInstallDir = "/usr/local/bin"
+
+// macOSReceiptPath is where macOS records that our package is installed. It is
+// a variable so tests can point it at a temporary file.
+var macOSReceiptPath = "/var/db/receipts/" + MacOSPackageID + ".plist"
+
+// detectSourceForExecutable classifies a resolved executable, consulting the
+// filesystem for markers that a path alone cannot reveal.
+func detectSourceForExecutable(exe, goos string) Source {
+	if s := detectSourceForPath(exe, goos); s != SourceManual {
+		return s
+	}
+
+	switch goos {
+	case "windows":
+		// Inno Setup always writes its uninstaller next to the program, which
+		// identifies the install wherever the user put it.
+		if hasInnoUninstaller(filepath.Dir(exe)) {
+			return SourceInstaller
+		}
+	case "darwin":
+		// The receipt only says the package is installed somewhere. A copy the
+		// user placed elsewhere is still theirs to replace, so the binary has
+		// to be the one the package owns.
+		p := strings.ReplaceAll(exe, `\`, "/")
+		if strings.HasPrefix(p, macOSInstallDir+"/") && fileExists(macOSReceiptPath) {
+			return SourceInstaller
+		}
+	}
+	return SourceManual
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// hasInnoUninstaller reports whether dir holds an Inno Setup uninstaller.
+func hasInnoUninstaller(dir string) bool {
+	// Inno numbers them when several installs share a directory: unins000.exe,
+	// unins001.exe, and so on.
+	matches, err := filepath.Glob(filepath.Join(dir, "unins[0-9][0-9][0-9].exe"))
+	return err == nil && len(matches) > 0
 }
 
 // detectSourceForPath is the pure part of DetectSource, so the path rules can

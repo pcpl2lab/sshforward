@@ -11,7 +11,7 @@
     "#1": {
       "0409": {
         "identity": {
-          "name": "pcpl2.sshforward",
+          "name": "pcpl2lab.sshforward",
           "version": "0.0.0.0"
         },
         "description": "SSH port forwarding manager",
@@ -41,7 +41,7 @@
         },
         "info": {
           "0409": {
-            "Comments": "https://github.com/pcpl2/sshforward",
+            "Comments": "https://github.com/pcpl2lab/sshforward",
             "CompanyName": "Patryk Ławicki",
             "FileDescription": "SSH port forwarding manager",
             "FileVersion": "",

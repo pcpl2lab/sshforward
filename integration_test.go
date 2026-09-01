@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/pcpl2/sshforward/internal/config"
-	"github.com/pcpl2/sshforward/internal/tunnel"
+	"github.com/pcpl2lab/sshforward/internal/config"
+	"github.com/pcpl2lab/sshforward/internal/tunnel"
 )
 
 func TestConfigLoadAndServiceLookup_SinglePort(t *testing.T) {

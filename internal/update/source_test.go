@@ -1,6 +1,10 @@
 package update
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestDetectSourceForPath(t *testing.T) {
 	tests := []struct {
@@ -36,13 +40,13 @@ func TestDetectSourceForPath(t *testing.T) {
 		{
 			name: "winget packages directory",
 			goos: "windows",
-			path: `C:\Users\dev\AppData\Local\Microsoft\WinGet\Packages\pcpl2.sshforward\sshforward.exe`,
+			path: `C:\Users\dev\AppData\Local\Microsoft\WinGet\Packages\pcpl2lab.sshforward\sshforward.exe`,
 			want: SourceWinGet,
 		},
 		{
 			name: "winget path casing is ignored",
 			goos: "windows",
-			path: `c:\users\dev\appdata\local\microsoft\winget\packages\pcpl2.sshforward\sshforward.exe`,
+			path: `c:\users\dev\appdata\local\microsoft\winget\packages\pcpl2lab.sshforward\sshforward.exe`,
 			want: SourceWinGet,
 		},
 		{
@@ -133,5 +137,96 @@ func TestParseSource(t *testing.T) {
 				t.Errorf("ParseSource(%q) = %v, want %v", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDetectSourceForExecutable_InnoSetupInstall(t *testing.T) {
+	// Inno Setup always drops its uninstaller beside the program. That marker is
+	// far more reliable than the install path, which is an ordinary-looking
+	// directory under %LOCALAPPDATA%\Programs and would otherwise read as a
+	// manual install that self-update is free to overwrite.
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "sshforward.exe")
+	if err := os.WriteFile(exe, []byte("binary"), 0o755); err != nil {
+		t.Fatalf("write executable: %v", err)
+	}
+
+	if got := detectSourceForExecutable(exe, "windows"); got != SourceManual {
+		t.Errorf("without the uninstaller present, got %v, want %v", got, SourceManual)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "unins000.exe"), []byte("uninstaller"), 0o755); err != nil {
+		t.Fatalf("write uninstaller: %v", err)
+	}
+	if got := detectSourceForExecutable(exe, "windows"); got != SourceInstaller {
+		t.Errorf("with the uninstaller beside it, got %v, want %v", got, SourceInstaller)
+	}
+}
+
+func TestDetectSourceForExecutable_UninstallerIsWindowsOnly(t *testing.T) {
+	// A file called unins000.exe on Linux means nothing.
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "sshforward")
+	for _, name := range []string{"sshforward", "unins000.exe"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o755); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	if got := detectSourceForExecutable(exe, "linux"); got != SourceManual {
+		t.Errorf("got %v on linux, want %v", got, SourceManual)
+	}
+}
+
+func TestDetectSourceForExecutable_PathRulesStillWin(t *testing.T) {
+	// A package manager path must not be reclassified by the marker check.
+	got := detectSourceForExecutable(`C:\Users\dev\scoop\apps\sshforward\current\sshforward.exe`, "windows")
+	if got != SourceScoop {
+		t.Errorf("got %v, want %v", got, SourceScoop)
+	}
+}
+
+func TestSourceInstallerIsManagedAndAdvises(t *testing.T) {
+	if !SourceInstaller.Managed() {
+		t.Error("an installer-managed copy must not be replaced by self-update")
+	}
+	if SourceInstaller.UpgradeCommand() == "" {
+		t.Error("SourceInstaller must tell the user how to get the new version")
+	}
+	if _, ok := ParseSource("installer"); !ok {
+		t.Error(`ParseSource("installer") must be recognised for the env override`)
+	}
+}
+
+func TestDetectSourceForExecutable_MacOSPackageReceipt(t *testing.T) {
+	// A .pkg install lands in /usr/local/bin, which dpkg-style rules treat as a
+	// manual install. macOS records the package in /var/db/receipts, and that
+	// receipt is what tells the two apart.
+	receipt := filepath.Join(t.TempDir(), "ovh.pcpl2lab.sshforward.plist")
+	previous := macOSReceiptPath
+	macOSReceiptPath = receipt
+	t.Cleanup(func() { macOSReceiptPath = previous })
+
+	const installed = "/usr/local/bin/sshforward"
+
+	if got := detectSourceForExecutable(installed, "darwin"); got != SourceManual {
+		t.Errorf("with no receipt, got %v, want %v", got, SourceManual)
+	}
+
+	if err := os.WriteFile(receipt, []byte("<plist/>"), 0o644); err != nil {
+		t.Fatalf("write receipt: %v", err)
+	}
+	if got := detectSourceForExecutable(installed, "darwin"); got != SourceInstaller {
+		t.Errorf("with the receipt present, got %v, want %v", got, SourceInstaller)
+	}
+
+	// A copy the user put somewhere else is theirs to replace, even while the
+	// package is installed.
+	if got := detectSourceForExecutable("/Users/dev/bin/sshforward", "darwin"); got != SourceManual {
+		t.Errorf("for a binary outside the install location, got %v, want %v", got, SourceManual)
+	}
+
+	// The receipt is a macOS concept and must not leak into other platforms.
+	if got := detectSourceForExecutable(installed, "linux"); got != SourceManual {
+		t.Errorf("on linux, got %v, want %v", got, SourceManual)
 	}
 }

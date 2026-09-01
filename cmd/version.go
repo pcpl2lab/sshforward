@@ -11,7 +11,7 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-// Injected at build time via -ldflags "-X github.com/pcpl2/sshforward/cmd.version=...".
+// Injected at build time via -ldflags "-X github.com/pcpl2lab/sshforward/cmd.version=...".
 var (
 	version = "dev"
 	commit  = "none"

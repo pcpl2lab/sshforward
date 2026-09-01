@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -129,7 +130,35 @@ type goreleaserConfig struct {
 	Builds []struct {
 		Goos   []string `yaml:"goos"`
 		Goarch []string `yaml:"goarch"`
+		Ignore []struct {
+			Goos   string `yaml:"goos"`
+			Goarch string `yaml:"goarch"`
+		} `yaml:"ignore"`
 	} `yaml:"builds"`
+}
+
+// windowsArches returns the architectures actually built for Windows, which is
+// the goarch list minus the combinations the config ignores.
+func (c goreleaserConfig) windowsArches() []string {
+	if len(c.Builds) == 0 {
+		return nil
+	}
+	build := c.Builds[0]
+
+	ignored := map[string]bool{}
+	for _, ig := range build.Ignore {
+		if ig.Goos == "windows" {
+			ignored[ig.Goarch] = true
+		}
+	}
+
+	var out []string
+	for _, arch := range build.Goarch {
+		if !ignored[arch] {
+			out = append(out, arch)
+		}
+	}
+	return out
 }
 
 func TestGoreleaserGeneratesResourcesForEveryWindowsArch(t *testing.T) {
@@ -160,9 +189,21 @@ func TestGoreleaserGeneratesResourcesForEveryWindowsArch(t *testing.T) {
 	}
 
 	covered := archList(hook)
-	for _, arch := range cfg.Builds[0].Goarch {
+	built := cfg.windowsArches()
+	if len(built) == 0 {
+		t.Fatal("no Windows architectures resolved from .goreleaser.yaml")
+	}
+	for _, arch := range built {
 		if !covered[arch] {
 			t.Errorf("windows/%s is built but the go-winres hook does not cover it (--arch %v)", arch, keys(covered))
+		}
+	}
+
+	// The reverse direction matters too: an --arch entry for a target that is
+	// no longer built wastes a build step and hides a stale config.
+	for arch := range covered {
+		if !slices.Contains(built, arch) {
+			t.Errorf("the go-winres hook builds a resource for windows/%s, which is not in the build matrix", arch)
 		}
 	}
 }

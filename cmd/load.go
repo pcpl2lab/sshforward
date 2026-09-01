@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/pcpl2/sshforward/internal/config"
+	"github.com/pcpl2lab/sshforward/internal/config"
 )
 
 const exampleConfig = `services:

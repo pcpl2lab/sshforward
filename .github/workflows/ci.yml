@@ -35,3 +35,34 @@ jobs:
       - uses: golangci/golangci-lint-action@v9.3.0
         with:
           version: v2.13.2
+
+  # Compiles the Inno Setup script on every push. Without this the installer is
+  # only ever built during a release, where a typo in the script costs a tag.
+  installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build the Windows binaries
+        shell: pwsh
+        run: |
+          go generate ./...
+          foreach ($arch in '386', 'amd64', 'arm64') {
+            $env:GOOS = 'windows'; $env:GOARCH = $arch
+            New-Item -ItemType Directory -Force "winbin/$arch" | Out-Null
+            go build -o "winbin/$arch/sshforward.exe" .
+            if ($LASTEXITCODE -ne 0) { throw "build failed for windows/$arch" }
+          }
+      - name: Compile the installer
+        shell: pwsh
+        run: |
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) { throw "ISCC not found on the runner" }
+          & $iscc /DAppVersion=0.0.0 /DBinDir=..\winbin /DOutputName=sshforward_ci_setup installer\sshforward.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+          if (-not (Test-Path dist\sshforward_ci_setup.exe)) { throw "installer was not produced" }
+          Write-Output "installer built: $((Get-Item dist\sshforward_ci_setup.exe).Length) bytes"

@@ -10,7 +10,7 @@ import (
 
 const latestReleaseBody = `{
   "tag_name": "v1.4.0",
-  "html_url": "https://github.com/pcpl2/sshforward/releases/tag/v1.4.0",
+  "html_url": "https://github.com/pcpl2lab/sshforward/releases/tag/v1.4.0",
   "assets": [
     {"name": "sshforward_linux_amd64.tar.gz", "browser_download_url": "https://dl.example/sshforward_linux_amd64.tar.gz"},
     {"name": "checksums.txt", "browser_download_url": "https://dl.example/checksums.txt"}
@@ -27,7 +27,7 @@ func TestClientLatest_ParsesRelease(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := &Client{BaseURL: srv.URL, Repo: "pcpl2/sshforward", UserAgent: "sshforward/v1.0.0", Token: "secret"}
+	c := &Client{BaseURL: srv.URL, Repo: "pcpl2lab/sshforward", UserAgent: "sshforward/v1.0.0", Token: "secret"}
 	rel, err := c.Latest(context.Background())
 	if err != nil {
 		t.Fatalf("Latest() failed: %v", err)
@@ -36,11 +36,11 @@ func TestClientLatest_ParsesRelease(t *testing.T) {
 	if rel.Version != "v1.4.0" {
 		t.Errorf("got version %q, want %q", rel.Version, "v1.4.0")
 	}
-	if rel.URL != "https://github.com/pcpl2/sshforward/releases/tag/v1.4.0" {
+	if rel.URL != "https://github.com/pcpl2lab/sshforward/releases/tag/v1.4.0" {
 		t.Errorf("got release URL %q, want the html_url from the payload", rel.URL)
 	}
-	if gotPath != "/repos/pcpl2/sshforward/releases/latest" {
-		t.Errorf("got request path %q, want /repos/pcpl2/sshforward/releases/latest", gotPath)
+	if gotPath != "/repos/pcpl2lab/sshforward/releases/latest" {
+		t.Errorf("got request path %q, want /repos/pcpl2lab/sshforward/releases/latest", gotPath)
 	}
 	if gotAccept != "application/vnd.github+json" {
 		t.Errorf("got Accept %q, want application/vnd.github+json", gotAccept)
@@ -61,7 +61,7 @@ func TestClientLatest_OmitsAuthorizationWithoutToken(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := &Client{BaseURL: srv.URL, Repo: "pcpl2/sshforward"}
+	c := &Client{BaseURL: srv.URL, Repo: "pcpl2lab/sshforward"}
 	if _, err := c.Latest(context.Background()); err != nil {
 		t.Fatalf("Latest() failed: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestReleaseAssetURL(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := &Client{BaseURL: srv.URL, Repo: "pcpl2/sshforward"}
+	c := &Client{BaseURL: srv.URL, Repo: "pcpl2lab/sshforward"}
 	rel, err := c.Latest(context.Background())
 	if err != nil {
 		t.Fatalf("Latest() failed: %v", err)
@@ -102,7 +102,7 @@ func TestClientLatest_HTTPErrorIsReported(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := &Client{BaseURL: srv.URL, Repo: "pcpl2/sshforward"}
+	c := &Client{BaseURL: srv.URL, Repo: "pcpl2lab/sshforward"}
 	_, err := c.Latest(context.Background())
 	if err == nil {
 		t.Fatal("got nil error for a 403 response, want one")
@@ -119,7 +119,7 @@ func TestClientLatest_MalformedJSONIsReported(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := &Client{BaseURL: srv.URL, Repo: "pcpl2/sshforward"}
+	c := &Client{BaseURL: srv.URL, Repo: "pcpl2lab/sshforward"}
 	if _, err := c.Latest(context.Background()); err == nil {
 		t.Fatal("got nil error for a non-JSON response, want one")
 	}

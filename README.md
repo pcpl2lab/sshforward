@@ -1,6 +1,6 @@
 # sshforward
 
-[![CI](https://github.com/pcpl2/sshforward/actions/workflows/ci.yml/badge.svg)](https://github.com/pcpl2/sshforward/actions/workflows/ci.yml)
+[![CI](https://github.com/pcpl2lab/sshforward/actions/workflows/ci.yml/badge.svg)](https://github.com/pcpl2lab/sshforward/actions/workflows/ci.yml)
 [![License: BSD-2-Clause](https://img.shields.io/badge/license-BSD--2--Clause-blue.svg)](LICENSE)
 
 A cross-platform CLI tool for managing SSH local port forwarding tunnels as background processes.
@@ -57,23 +57,100 @@ asciinema play docs/demo/demo-basic.cast
 
 ## Installation
 
+### macOS
+
+Homebrew:
+
+```bash
+brew install pcpl2lab/tap/sshforward
+```
+
+Or download `sshforward_<version>_macos.pkg` from the
+[Releases](https://github.com/pcpl2lab/sshforward/releases) page. It installs a
+single universal binary into `/usr/local/bin`, which is already on your `PATH`,
+and runs natively on both Intel and Apple Silicon.
+
+The package is not notarised, so macOS refuses it on first open: right-click it
+in Finder and choose **Open**, then confirm. Homebrew avoids that entirely.
+
+### Windows
+
+WinGet:
+
+```powershell
+winget install pcpl2lab.sshforward
+```
+
+Scoop:
+
+```powershell
+scoop bucket add pcpl2lab https://github.com/pcpl2lab/scoop-bucket
+scoop install sshforward
+```
+
+Or download `sshforward_<version>_windows_setup.exe` from the
+[Releases](https://github.com/pcpl2lab/sshforward/releases) page. One installer
+covers x64, ARM64 and 32-bit — it picks the right binary itself, installs
+per-user so it never asks for administrator rights, and offers to add itself to
+your `PATH`.
+
+The installer is not code-signed, so SmartScreen shows a warning on first run:
+choose **More info → Run anyway**. Scoop avoids that prompt entirely.
+
+### Linux — APT repository
+
+Debian and Ubuntu, with `apt upgrade` working from then on:
+
+```bash
+curl -fsSL https://apt.pcpl2lab.ovh/pcpl2lab.gpg |
+  sudo tee /usr/share/keyrings/pcpl2lab.gpg >/dev/null
+
+echo "deb [signed-by=/usr/share/keyrings/pcpl2lab.gpg] https://apt.pcpl2lab.ovh stable main" |
+  sudo tee /etc/apt/sources.list.d/pcpl2lab.list
+
+sudo apt update
+sudo apt install sshforward
+```
+
+Built for `amd64`, `arm64`, `armhf` and `i386`.
+
+### Linux — single package
+
+For other distributions, download the `.rpm` or `.apk` for your architecture
+from the [Releases](https://github.com/pcpl2lab/sshforward/releases) page:
+
+```bash
+sudo dnf install ./sshforward-1.0.0-1.x86_64.rpm  # Fedora, RHEL
+sudo apk add --allow-untrusted ./sshforward_1.0.0_x86_64.apk
+```
+
+The packages install to `/usr/bin/sshforward` and depend on the OpenSSH client.
+
+Homebrew on Linux is not an option here: Homebrew serves this project as a
+cask, and casks install only on macOS.
+
 ### Prebuilt binaries
 
-Download a prebuilt binary for your platform from the
-[Releases](https://github.com/pcpl2/sshforward/releases) page.
-Archives are published for Linux, macOS and Windows on `amd64` and `arm64`,
-together with a `checksums.txt`.
+Download an archive for your platform from the
+[Releases](https://github.com/pcpl2lab/sshforward/releases) page, together with
+`checksums.txt`. Archives are published for:
+
+| OS | Architectures |
+|---|---|
+| Linux | `amd64`, `arm64`, `arm` (v6), `386` |
+| Windows | `amd64`, `arm64`, `386` |
+| macOS | `amd64`, `arm64` |
 
 ### From source
 
 ```bash
-go install github.com/pcpl2/sshforward@latest
+go install github.com/pcpl2lab/sshforward@latest
 ```
 
 ### Build manually
 
 ```bash
-git clone https://github.com/pcpl2/sshforward.git
+git clone https://github.com/pcpl2lab/sshforward.git
 cd sshforward
 go build -o sshforward .        # sshforward.exe on Windows
 ```

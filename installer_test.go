@@ -1,0 +1,177 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/pcpl2lab/sshforward/internal/update"
+	"gopkg.in/yaml.v3"
+)
+
+const issPath = "installer/sshforward.iss"
+
+// appID is the Inno Setup AppId of the Windows installer. Windows recognises an
+// upgrade of an existing install by this value, so changing it would install a
+// second copy beside the first and orphan the old uninstall entry. It is
+// pinned here so that a change has to be deliberate.
+const appID = "{{923ADEC1-21DD-42F7-A149-0AAAB97049F9}"
+
+func readISS(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile(issPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", issPath, err)
+	}
+	return string(data)
+}
+
+// issDirective returns the value of a [Setup] directive such as AppId.
+func issDirective(script, name string) string {
+	re := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(name) + `=(.*)$`)
+	m := re.FindStringSubmatch(script)
+	if m == nil {
+		return ""
+	}
+	return strings.TrimSpace(m[1])
+}
+
+func TestInstallerAppIDIsPinned(t *testing.T) {
+	if got := issDirective(readISS(t), "AppId"); got != appID {
+		t.Errorf("got AppId %q, want %q; changing it breaks upgrades of existing installs", got, appID)
+	}
+}
+
+func TestInstallerNeedsNoAdministrator(t *testing.T) {
+	// The binary's own manifest declares asInvoker. An installer that demanded
+	// elevation would contradict it and put a UAC prompt in front of a tool
+	// that only ever writes inside the user's profile.
+	if got := issDirective(readISS(t), "PrivilegesRequired"); got != "lowest" {
+		t.Errorf("got PrivilegesRequired %q, want lowest", got)
+	}
+}
+
+func TestInstallerReferencedFilesExist(t *testing.T) {
+	// The script reaches out of its own directory for the licence, the readme
+	// and the icon. Moving or renaming any of them breaks the release build,
+	// which otherwise only shows up on the Windows runner.
+	script := readISS(t)
+
+	paths := map[string]string{
+		"LicenseFile":   issDirective(script, "LicenseFile"),
+		"SetupIconFile": issDirective(script, "SetupIconFile"),
+	}
+	for _, m := range regexp.MustCompile(`(?m)^Source:\s*"([^"]+)"`).FindAllStringSubmatch(script, -1) {
+		src := m[1]
+		// Architecture binaries come from BinDir, which only exists during a
+		// release build.
+		if strings.Contains(src, "{#BinDir}") {
+			continue
+		}
+		paths["Source "+src] = src
+	}
+
+	for what, rel := range paths {
+		if rel == "" {
+			t.Errorf("%s is not set in %s", what, issPath)
+			continue
+		}
+		// Paths in the script are relative to the script's own directory.
+		full := filepath.Join("installer", filepath.FromSlash(strings.ReplaceAll(rel, `\`, "/")))
+		if _, err := os.Stat(full); err != nil {
+			t.Errorf("%s points at %q, which does not exist: %v", what, rel, err)
+		}
+	}
+}
+
+func TestInstallerCoversEveryWindowsArch(t *testing.T) {
+	// One installer serves all Windows architectures by picking a binary at
+	// install time. An architecture that the build matrix produces but the
+	// script does not reference would silently install nothing on that machine.
+	data, err := os.ReadFile(".goreleaser.yaml")
+	if err != nil {
+		t.Fatalf("read .goreleaser.yaml: %v", err)
+	}
+	var cfg goreleaserConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("parse .goreleaser.yaml: %v", err)
+	}
+
+	script := readISS(t)
+	for _, arch := range cfg.windowsArches() {
+		if !strings.Contains(script, `{#BinDir}\`+arch+`\sshforward.exe`) {
+			t.Errorf("windows/%s is built but %s installs no binary for it", arch, issPath)
+		}
+	}
+}
+
+func TestMacOSPackageIdentifierIsConsistent(t *testing.T) {
+	// The identifier appears in three places: the Go constant that finds the
+	// receipt, the productbuild distribution, and the pkgbuild call in the
+	// release workflow. If they drift, the package still installs but
+	// `sshforward update` stops recognising it and offers to overwrite a file
+	// the installer owns.
+	id := update.MacOSPackageID
+
+	for _, f := range []string{
+		"installer/macos/distribution.xml",
+		".github/workflows/release.yml",
+	} {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		if !strings.Contains(string(data), id) {
+			t.Errorf("%s does not mention the package identifier %q", f, id)
+		}
+	}
+}
+
+func TestMacOSInstallerShipsAUniversalBinary(t *testing.T) {
+	// Two architectures fused into one binary is what lets the package install
+	// without asking the user which Mac they have. Dropping the lipo step would
+	// silently ship an Intel-only or ARM-only package.
+	data, err := os.ReadFile(".github/workflows/release.yml")
+	if err != nil {
+		t.Fatalf("read workflow: %v", err)
+	}
+	workflow := string(data)
+
+	if !strings.Contains(workflow, "lipo -create") {
+		t.Error("the macOS package job no longer fuses the two architectures with lipo")
+	}
+	for _, arch := range []string{"amd64", "arm64"} {
+		if !strings.Contains(workflow, "macbin/"+arch+"/sshforward") {
+			t.Errorf("the macOS package job does not use the %s binary", arch)
+		}
+	}
+}
+
+func TestAptRepositoryCachePolicy(t *testing.T) {
+	// Cloudflare Pages caches at the edge. A stale Release served next to a
+	// fresh Packages is precisely what makes apt report "Hash Sum mismatch",
+	// so the index must never be cached while the pool - whose filenames carry
+	// the version - safely can be.
+	data, err := os.ReadFile("installer/apt/publish.sh")
+	if err != nil {
+		t.Fatalf("read publish.sh: %v", err)
+	}
+	script := string(data)
+
+	_, headers, found := strings.Cut(script, "cat >_headers")
+	if !found {
+		t.Fatal("publish.sh writes no _headers file, so Cloudflare's default caching applies to the index")
+	}
+
+	_, afterDists, found := strings.Cut(headers, "/dists/*")
+	if !found {
+		t.Fatal("_headers has no rule for /dists/*")
+	}
+	// The directive follows the pattern on the next indented line.
+	rule, _, _ := strings.Cut(strings.TrimLeft(afterDists, "\n"), "\n\n")
+	if !strings.Contains(rule, "no-cache") {
+		t.Errorf("/dists/* is not marked no-cache, so a cached index would break apt after a release; got %q", rule)
+	}
+}

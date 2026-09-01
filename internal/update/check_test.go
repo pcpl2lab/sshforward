@@ -28,7 +28,7 @@ func TestCheck_QueriesGitHubAndCachesTheAnswer(t *testing.T) {
 	res, err := Check(context.Background(), CheckOptions{
 		CurrentVersion: "v1.0.0",
 		Dir:            dir,
-		Client:         &Client{BaseURL: srv.URL, Repo: "pcpl2/sshforward"},
+		Client:         &Client{BaseURL: srv.URL, Repo: "pcpl2lab/sshforward"},
 	})
 	if err != nil {
 		t.Fatalf("Check failed: %v", err)
@@ -60,7 +60,7 @@ func TestCheck_FreshCacheSkipsTheNetwork(t *testing.T) {
 	res, err := Check(context.Background(), CheckOptions{
 		CurrentVersion: "v1.0.0",
 		Dir:            dir,
-		Client:         &Client{BaseURL: srv.URL, Repo: "pcpl2/sshforward"},
+		Client:         &Client{BaseURL: srv.URL, Repo: "pcpl2lab/sshforward"},
 	})
 	if err != nil {
 		t.Fatalf("Check failed: %v", err)
@@ -85,7 +85,7 @@ func TestCheck_StaleCacheRefreshes(t *testing.T) {
 	res, err := Check(context.Background(), CheckOptions{
 		CurrentVersion: "v1.0.0",
 		Dir:            dir,
-		Client:         &Client{BaseURL: srv.URL, Repo: "pcpl2/sshforward"},
+		Client:         &Client{BaseURL: srv.URL, Repo: "pcpl2lab/sshforward"},
 	})
 	if err != nil {
 		t.Fatalf("Check failed: %v", err)
@@ -110,7 +110,7 @@ func TestCheck_ForceIgnoresAFreshCache(t *testing.T) {
 		CurrentVersion: "v1.0.0",
 		Dir:            dir,
 		Force:          true,
-		Client:         &Client{BaseURL: srv.URL, Repo: "pcpl2/sshforward"},
+		Client:         &Client{BaseURL: srv.URL, Repo: "pcpl2lab/sshforward"},
 	})
 	if err != nil {
 		t.Fatalf("Check failed: %v", err)
@@ -129,7 +129,7 @@ func TestCheck_UpToDateReportsNoUpdate(t *testing.T) {
 	res, err := Check(context.Background(), CheckOptions{
 		CurrentVersion: "v1.4.0",
 		Dir:            t.TempDir(),
-		Client:         &Client{BaseURL: srv.URL, Repo: "pcpl2/sshforward"},
+		Client:         &Client{BaseURL: srv.URL, Repo: "pcpl2lab/sshforward"},
 	})
 	if err != nil {
 		t.Fatalf("Check failed: %v", err)
@@ -154,7 +154,7 @@ func TestCheck_NetworkFailureIsReportedAndLeavesTheCacheAlone(t *testing.T) {
 	_, err := Check(context.Background(), CheckOptions{
 		CurrentVersion: "v1.0.0",
 		Dir:            dir,
-		Client:         &Client{BaseURL: srv.URL, Repo: "pcpl2/sshforward"},
+		Client:         &Client{BaseURL: srv.URL, Repo: "pcpl2lab/sshforward"},
 	})
 	if err == nil {
 		t.Fatal("got nil error for a failing server, want one")
@@ -173,7 +173,7 @@ func TestCheck_DevBuildNeverReportsAnUpdate(t *testing.T) {
 	res, err := Check(context.Background(), CheckOptions{
 		CurrentVersion: "dev",
 		Dir:            t.TempDir(),
-		Client:         &Client{BaseURL: srv.URL, Repo: "pcpl2/sshforward"},
+		Client:         &Client{BaseURL: srv.URL, Repo: "pcpl2lab/sshforward"},
 	})
 	if err != nil {
 		t.Fatalf("Check failed: %v", err)
@@ -194,7 +194,7 @@ func TestCheck_NetworkAnswerCarriesTheRelease(t *testing.T) {
 	res, err := Check(context.Background(), CheckOptions{
 		CurrentVersion: "v1.0.0",
 		Dir:            t.TempDir(),
-		Client:         &Client{BaseURL: srv.URL, Repo: "pcpl2/sshforward"},
+		Client:         &Client{BaseURL: srv.URL, Repo: "pcpl2lab/sshforward"},
 	})
 	if err != nil {
 		t.Fatalf("Check failed: %v", err)
@@ -218,7 +218,7 @@ func TestCheck_CachedAnswerCarriesNoRelease(t *testing.T) {
 	res, err := Check(context.Background(), CheckOptions{
 		CurrentVersion: "v1.0.0",
 		Dir:            dir,
-		Client:         &Client{BaseURL: "http://127.0.0.1:1", Repo: "pcpl2/sshforward"},
+		Client:         &Client{BaseURL: "http://127.0.0.1:1", Repo: "pcpl2lab/sshforward"},
 	})
 	if err != nil {
 		t.Fatalf("Check failed: %v", err)

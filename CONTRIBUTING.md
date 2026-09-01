@@ -18,7 +18,7 @@ go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
 ```
 
 ```bash
-git clone https://github.com/pcpl2/sshforward.git
+git clone https://github.com/pcpl2lab/sshforward.git
 cd sshforward
 go build -o sshforward .        # sshforward.exe on Windows
 ```

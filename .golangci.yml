@@ -26,7 +26,7 @@ linters:
         - (net.Conn).Close
         - (*os.Process).Release
         - golang.org/x/sys/windows.CloseHandle
-        - (*github.com/pcpl2/sshforward/internal/tunnel.FileLock).Release
+        - (*github.com/pcpl2lab/sshforward/internal/tunnel.FileLock).Release
     gosec:
       excludes:
         - G304 # reading user-specified config/state paths is the tool's purpose

@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/pcpl2/sshforward/internal/config"
-	"github.com/pcpl2/sshforward/internal/update"
+	"github.com/pcpl2lab/sshforward/internal/config"
+	"github.com/pcpl2lab/sshforward/internal/update"
 	"github.com/spf13/cobra"
 )
 

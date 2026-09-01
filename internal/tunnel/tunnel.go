@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pcpl2/sshforward/internal/port"
+	"github.com/pcpl2lab/sshforward/internal/port"
 )
 
 // safeHostPattern allows only valid SSH host names (alphanumeric, dots, hyphens, underscores).

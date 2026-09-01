@@ -6,7 +6,7 @@ before:
     # Windows version resource: the .syso files are per-architecture, are not
     # committed, and carry the release tag, so they are built here rather than
     # kept in the repo. Every windows goarch below must appear in --arch.
-    - go run github.com/tc-hib/go-winres@v0.3.3 make --arch amd64,arm64 --file-version {{ .Version }} --product-version {{ .Version }}
+    - go run github.com/tc-hib/go-winres@v0.3.3 make --arch 386,amd64,arm64 --file-version {{ .Version }} --product-version {{ .Version }}
 
 builds:
   - env:
@@ -16,13 +16,29 @@ builds:
       - windows
       - darwin
     goarch:
+      - "386"
       - amd64
+      - arm
       - arm64
+    # GOARM 6 runs on every 32-bit ARM board, including the Raspberry Pi 1
+    # and Zero. Building v7 as well would only save a little speed on newer
+    # boards while doubling the ARM32 artifacts.
+    goarm:
+      - "6"
+    ignore:
+      # Go dropped 32-bit macOS, and Apple never shipped 32-bit ARM.
+      - goos: darwin
+        goarch: "386"
+      - goos: darwin
+        goarch: arm
+      # Windows on 32-bit ARM died with Windows RT.
+      - goos: windows
+        goarch: arm
     ldflags:
       - -s -w
-      - -X github.com/pcpl2/sshforward/cmd.version={{ .Version }}
-      - -X github.com/pcpl2/sshforward/cmd.commit={{ .Commit }}
-      - -X github.com/pcpl2/sshforward/cmd.date={{ .Date }}
+      - -X github.com/pcpl2lab/sshforward/cmd.version={{ .Version }}
+      - -X github.com/pcpl2lab/sshforward/cmd.commit={{ .Commit }}
+      - -X github.com/pcpl2lab/sshforward/cmd.date={{ .Date }}
 
 archives:
   - formats: [tar.gz]
@@ -34,6 +50,83 @@ archives:
 
 checksum:
   name_template: "checksums.txt"
+
+# Homebrew, as a cask rather than a formula: `brews` is deprecated in v2.
+# Casks are macOS-only — Linuxbrew does not support them — so Linux is served by
+# the nfpm packages below instead.
+homebrew_casks:
+  - repository:
+      owner: pcpl2lab
+      name: homebrew-tap
+      branch: main
+      # Pushed over SSH with a deploy key rather than a token: a deploy key can
+      # write to this one repository and nothing else, and carries no account
+      # identity. It must have no passphrase - GoReleaser rejects protected keys.
+      git:
+        url: "git@github.com:pcpl2lab/homebrew-tap.git"
+        private_key: "{{ .Env.HOMEBREW_TAP_DEPLOY_KEY }}"
+    binaries: [sshforward]
+    description: "SSH port forwarding manager"
+    homepage: "https://github.com/pcpl2lab/sshforward"
+
+scoops:
+  - repository:
+      owner: pcpl2lab
+      name: scoop-bucket
+      branch: main
+      git:
+        url: "git@github.com:pcpl2lab/scoop-bucket.git"
+        private_key: "{{ .Env.SCOOP_BUCKET_DEPLOY_KEY }}"
+    description: "SSH port forwarding manager"
+    license: BSD-2-Clause
+    homepage: "https://github.com/pcpl2lab/sshforward"
+
+# WinGet manifests are pushed to a branch in our fork of microsoft/winget-pkgs.
+# With a deploy key GoReleaser pushes but does not open the pull request, so the
+# PR to upstream is opened by hand once per release - which is no bad thing,
+# since every submission is reviewed there anyway.
+#
+# The default manifest path is built from package_identifier, giving
+# manifests/p/pcpl2lab/sshforward/<version>, which is the convention upstream
+# expects. The Windows archives are zip, so this publishes a portable package.
+winget:
+  - name: sshforward
+    package_identifier: pcpl2lab.sshforward
+    publisher: pcpl2lab
+    publisher_url: "https://github.com/pcpl2lab"
+    publisher_support_url: "https://github.com/pcpl2lab/sshforward/issues"
+    short_description: "SSH port forwarding manager"
+    description: "Manage SSH local port forwarding tunnels as background processes. Define services once in a config file and start, list and stop them with a single command."
+    license: BSD-2-Clause
+    license_url: "https://github.com/pcpl2lab/sshforward/blob/main/LICENSE"
+    homepage: "https://github.com/pcpl2lab/sshforward"
+    copyright: "Copyright (c) 2026 Patryk Ławicki"
+    repository:
+      owner: pcpl2lab
+      name: winget-pkgs
+      # A branch per release keeps the fork's master clean and syncable with
+      # upstream. The fork's default branch is master, not main.
+      branch: "sshforward-{{ .Version }}"
+      git:
+        url: "git@github.com:pcpl2lab/winget-pkgs.git"
+        private_key: "{{ .Env.WINGET_FORK_DEPLOY_KEY }}"
+
+nfpms:
+  - formats: [deb, rpm, apk]
+    maintainer: "Patryk Ławicki"
+    description: "SSH port forwarding manager"
+    license: BSD-2-Clause
+    homepage: "https://github.com/pcpl2lab/sshforward"
+    # dpkg's own naming, so the files sort and upgrade the way apt expects.
+    file_name_template: "{{ .ConventionalFileName }}"
+    # sshforward drives the system ssh client, so it is a hard dependency.
+    # The package is named differently on each distro family.
+    dependencies:
+      - openssh-client
+    overrides:
+      rpm:
+        dependencies:
+          - openssh-clients
 
 changelog:
   sort: asc

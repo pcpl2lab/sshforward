@@ -1,8 +1,13 @@
 name: Release
 
-# Releases are cut on demand. The tag and the GitHub release are both created
-# here, by the release step itself, so nothing is published by pushing a tag by
-# hand and a failed build leaves no stray tag behind.
+# Releases are cut on demand. The tag is created here and GoReleaser publishes
+# everything from it: the GitHub release with all artifacts, the Homebrew cask
+# and the Scoop manifest.
+#
+# GoReleaser has to own the release. Its cask and scoop pipes sit inside the
+# publish stage, which is all-or-nothing in the OSS edition: skipping release
+# creation would silently skip pushing the cask and the manifest as well, and
+# OSS has no separate publish command to run them afterwards.
 on:
   workflow_dispatch:
     inputs:
@@ -35,7 +40,6 @@ jobs:
       # The input reaches the shell through the environment, never through
       # template interpolation, so it cannot be injected into the script.
       - name: Validate the version
-        id: check
         env:
           VERSION: ${{ inputs.version }}
         run: |
@@ -47,11 +51,6 @@ jobs:
             echo "::error::tag $VERSION already exists"
             exit 1
           fi
-          # GoReleaser derives the changelog range from the previous tag. It
-          # normally finds it by walking back from the current tag, which does
-          # not exist yet here, so hand it over explicitly. Empty on the first
-          # release, which correctly logs the whole history.
-          echo "previous_tag=$(git describe --tags --abbrev=0 2>/dev/null || true)" >>"$GITHUB_OUTPUT"
 
       - uses: actions/setup-go@v7.0.0
         with:
@@ -64,33 +63,220 @@ jobs:
           go vet ./...
           go test ./... -count=1
 
-      # Builds the archives, checksums and dist/CHANGELOG.md.
-      #
-      # Both env vars are load-bearing. GORELEASER_CURRENT_TAG supplies the
-      # version for ldflags, archive names and the Windows resource, since no
-      # tag exists yet. skip=validate is what allows that: validation insists a
-      # tag points at HEAD. skip=publish leaves the release to the next step.
+      # GoReleaser reads the version, the changelog range and the download URLs
+      # from a real tag, so it has to exist before the build.
+      - name: Create the tag
+        id: tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION" -m "$VERSION"
+          git push origin "$VERSION"
+
       - uses: goreleaser/goreleaser-action@v7.2.3
         with:
           version: "~> v2"
-          args: release --clean --skip=publish,validate
+          args: release --clean ${{ inputs.draft && '--draft' || '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GORELEASER_CURRENT_TAG: ${{ inputs.version }}
-          GORELEASER_PREVIOUS_TAG: ${{ steps.check.outputs.previous_tag }}
+          # The cask and the Scoop manifest are pushed to other repositories,
+          # which GITHUB_TOKEN cannot write to. One deploy key per repository,
+          # because GitHub refuses to reuse a key across repos.
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          SCOOP_BUCKET_DEPLOY_KEY: ${{ secrets.SCOOP_BUCKET_DEPLOY_KEY }}
+          WINGET_FORK_DEPLOY_KEY: ${{ secrets.WINGET_FORK_DEPLOY_KEY }}
 
-      # Creates the tag on the exact commit that was built and tested, and the
-      # release along with it.
-      - uses: softprops/action-gh-release@v3.0.3
-        with:
-          tag_name: ${{ inputs.version }}
-          target_commitish: ${{ github.sha }}
-          name: ${{ inputs.version }}
-          body_path: dist/CHANGELOG.md
-          draft: ${{ inputs.draft }}
-          prerelease: ${{ contains(inputs.version, '-') }}
-          fail_on_unmatched_files: true
-          files: |
-            dist/*.tar.gz
-            dist/*.zip
-            dist/checksums.txt
+      # A tag with no release behind it would have to be deleted by hand before
+      # the version could be retried.
+      - name: Remove the tag if the release did not complete
+        if: failure() && steps.tag.outcome == 'success'
+        env:
+          VERSION: ${{ inputs.version }}
+        run: git push --delete origin "$VERSION"
+
+  # The installer ships the exact binaries that were published, downloaded back
+  # from the release, rather than a rebuild that would carry a different build
+  # date and never be covered by checksums.txt.
+  installer:
+    needs: release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Fetch the released Windows binaries
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          foreach ($arch in '386', 'amd64', 'arm64') {
+            $name = "sshforward_windows_$arch.zip"
+            gh release download $env:VERSION --repo $env:GITHUB_REPOSITORY --pattern $name --dir zips
+            if ($LASTEXITCODE -ne 0) { throw "could not download $name" }
+            Expand-Archive "zips/$name" -DestinationPath "winbin/$arch"
+          }
+
+      - name: Build the installer
+        shell: pwsh
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          $version = $env:VERSION.TrimStart('v')
+          $out = "sshforward_${version}_windows_setup"
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          & $iscc "/DAppVersion=$version" /DBinDir=..\winbin "/DOutputName=$out" installer\sshforward.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+          "SETUP_EXE=dist\$out.exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Attach it to the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          gh release upload $env:VERSION $env:SETUP_EXE --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { throw "upload failed" }
+
+  # A macOS installer package. GoReleaser's pkg support is Pro-only, but
+  # pkgbuild and productbuild ship with macOS, so this needs no dependencies.
+  # A .pkg installs straight into /usr/local/bin, which is on the default PATH -
+  # a .dmg would only hand the user a file to copy somewhere themselves.
+  macos-pkg:
+    needs: release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Fetch the released macOS binaries
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          for arch in amd64 arm64; do
+            name="sshforward_darwin_${arch}.tar.gz"
+            gh release download "$VERSION" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir tars
+            mkdir -p "macbin/$arch"
+            tar -xzf "tars/$name" -C "macbin/$arch"
+          done
+
+      - name: Build the package
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          version="${VERSION#v}"
+
+          # One binary that runs natively on both Intel and Apple Silicon, so
+          # the installer never asks the user which Mac they have.
+          mkdir -p stage
+          lipo -create -output stage/sshforward macbin/amd64/sshforward macbin/arm64/sshforward
+          chmod 755 stage/sshforward
+          lipo -info stage/sshforward
+
+          pkgbuild --root stage             --identifier ovh.pcpl2lab.sshforward             --version "$version"             --install-location /usr/local/bin             component.pkg
+
+          mkdir -p resources
+          cp LICENSE resources/LICENSE.txt
+          cp installer/macos/welcome.html resources/welcome.html
+
+          mkdir -p dist
+          out="dist/sshforward_${version}_macos.pkg"
+          productbuild --distribution installer/macos/distribution.xml             --resources resources --package-path . "$out"
+          echo "PKG=$out" >>"$GITHUB_ENV"
+
+      - name: Check the package installs and the command runs
+        run: |
+          set -eu
+          sudo installer -pkg "$PKG" -target /
+          /usr/local/bin/sshforward version
+          pkgutil --pkg-info ovh.pcpl2lab.sshforward
+
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: gh release upload "$VERSION" "$PKG" --repo "$GITHUB_REPOSITORY" --clobber
+
+  # Publishes the .deb packages to the APT repository on GitHub Pages, so
+  # Debian and Ubuntu users get `apt upgrade` rather than a manual download.
+  # GoReleaser has no APT publisher in the OSS edition; this signs and pushes
+  # the repository itself.
+  apt:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Fetch the released packages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          mkdir -p debs
+          gh release download "$VERSION" --repo "$GITHUB_REPOSITORY" --pattern '*.deb' --dir debs
+          ls -l debs
+
+      - name: Check out the APT repository
+        env:
+          APT_REPO_DEPLOY_KEY: ${{ secrets.APT_REPO_DEPLOY_KEY }}
+        run: |
+          set -eu
+          mkdir -p ~/.ssh
+          printf '%s\n' "$APT_REPO_DEPLOY_KEY" >~/.ssh/apt_key
+          chmod 600 ~/.ssh/apt_key
+          export GIT_SSH_COMMAND='ssh -i ~/.ssh/apt_key -o StrictHostKeyChecking=accept-new -F /dev/null'
+          echo "GIT_SSH_COMMAND=$GIT_SSH_COMMAND" >>"$GITHUB_ENV"
+          git clone git@github.com:pcpl2lab/apt.git aptrepo
+
+      - name: Import the signing key
+        env:
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+        run: |
+          set -eu
+          printf '%s\n' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+
+          # Signing uses the default key, so more than one would make the choice
+          # depend on import order - and clients are told to trust exactly one.
+          # `gpg --export-secret-keys` without a selector exports the whole
+          # keyring, which is the easy way to get this wrong.
+          count=$(gpg --list-secret-keys --with-colons | grep -c '^sec:' || true)
+          if [ "$count" -ne 1 ]; then
+            echo "::error::APT_GPG_PRIVATE_KEY must hold exactly one secret key, found $count"
+            exit 1
+          fi
+          gpg --list-secret-keys --keyid-format=long
+
+      - name: Rebuild and sign the repository
+        env:
+          DEB_DIR: ${{ github.workspace }}/debs
+          APT_URL: https://apt.pcpl2lab.ovh
+        run: |
+          set -eu
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq apt-utils
+          cd aptrepo
+          # Cloudflare Pages deploys this repository on push and takes the
+          # custom domain from its own project settings, so no CNAME file and no
+          # Jekyll opt-out are needed here.
+          bash "$GITHUB_WORKSPACE/installer/apt/publish.sh"
+
+      - name: Publish
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          cd aptrepo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "nothing changed"
+            exit 0
+          fi
+          git commit -m "sshforward $VERSION"
+          git push origin HEAD

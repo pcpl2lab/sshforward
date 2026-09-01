@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/pcpl2/sshforward/internal/config"
+	"github.com/pcpl2lab/sshforward/internal/config"
 	"github.com/spf13/cobra"
 )
 

@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pcpl2/sshforward/internal/sshconfig"
-	"github.com/pcpl2/sshforward/internal/tunnel"
+	"github.com/pcpl2lab/sshforward/internal/sshconfig"
+	"github.com/pcpl2lab/sshforward/internal/tunnel"
 	"github.com/spf13/cobra"
 )
 

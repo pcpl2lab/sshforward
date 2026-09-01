@@ -1,4 +1,4 @@
-module github.com/pcpl2/sshforward
+module github.com/pcpl2lab/sshforward
 
 go 1.27
 

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  productbuild distribution for the sshforward macOS installer.
+
+  The package installs a single universal binary into /usr/local/bin, which is
+  on the default PATH, so the command works straight after installation.
+-->
+<installer-gui-script minSpecVersion="2">
+    <title>sshforward</title>
+    <organization>ovh.pcpl2lab</organization>
+    <license file="LICENSE.txt"/>
+    <welcome file="welcome.html" mime-type="text/html"/>
+
+    <!-- A command line tool has nothing to choose, so hide the selection pane. -->
+    <options customize="never" require-scripts="false" hostArchitectures="x86_64,arm64"/>
+
+    <!-- macOS 11 is the oldest release Go still targets. -->
+    <volume-check>
+        <allowed-os-versions>
+            <os-version min="11.0"/>
+        </allowed-os-versions>
+    </volume-check>
+
+    <choices-outline>
+        <line choice="default">
+            <line choice="ovh.pcpl2lab.sshforward"/>
+        </line>
+    </choices-outline>
+    <choice id="default"/>
+    <choice id="ovh.pcpl2lab.sshforward" visible="false">
+        <pkg-ref id="ovh.pcpl2lab.sshforward"/>
+    </choice>
+    <pkg-ref id="ovh.pcpl2lab.sshforward" version="0" onConclusion="none">component.pkg</pkg-ref>
+</installer-gui-script>

@@ -15,7 +15,7 @@ release rather than backported.
 **Please do not open a public issue for security problems.**
 
 Report privately through GitHub:
-[**Report a vulnerability**](https://github.com/pcpl2/sshforward/security/advisories/new)
+[**Report a vulnerability**](https://github.com/pcpl2lab/sshforward/security/advisories/new)
 (Security → Advisories → Report a vulnerability).
 
 Useful things to include:

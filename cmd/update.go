@@ -9,8 +9,8 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/pcpl2/sshforward/internal/config"
-	"github.com/pcpl2/sshforward/internal/update"
+	"github.com/pcpl2lab/sshforward/internal/config"
+	"github.com/pcpl2lab/sshforward/internal/update"
 	"github.com/spf13/cobra"
 )
 
@@ -87,7 +87,7 @@ var updateCmd = &cobra.Command{
 		// Replacing a file a package manager owns breaks its manifest and is
 		// undone by the next upgrade, so hand the user its own command instead.
 		if src := update.DetectSource(); src.Managed() {
-			fmt.Fprintf(out, "\nThis copy was installed with %s. Update it with:\n  %s\n", src, src.UpgradeCommand())
+			fmt.Fprintf(out, "\nThis copy was installed with %s.\nTo update: %s\n", src, src.UpgradeCommand())
 			return nil
 		}
 
