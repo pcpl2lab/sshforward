@@ -37,6 +37,11 @@ jobs:
       - uses: golangci/golangci-lint-action@v9.3.0
         with:
           version: v2.15.0
+          # Build the linter with the toolchain pinned in go.mod. A prebuilt
+          # binary is compiled with whatever Go its release used and cannot read
+          # export data from a newer one ("export data version N is greater than
+          # maximum supported version"), which breaks lint on every Go bump.
+          install-mode: goinstall
 
   # Compiles the Inno Setup script on every push. Without this the installer is
   # only ever built during a release, where a typo in the script costs a tag.
