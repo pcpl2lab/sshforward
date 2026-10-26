@@ -48,7 +48,12 @@ func archiveLog(path string) error {
 		return os.Remove(path)
 	}
 	archived := strings.TrimSuffix(path, ".log") + "." + info.ModTime().Format(archiveTimeLayout) + ".log"
-	return os.Rename(path, archived)
+	// A concurrent `list` may have expired the log since the Stat above; it is
+	// out of the way either way.
+	if err := os.Rename(path, archived); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // ListArchivedLogs returns the logs in dir that no state file refers to,
