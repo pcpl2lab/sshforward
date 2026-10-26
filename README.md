@@ -333,8 +333,14 @@ Notes:
 
 - `stop` always stops **all** ports of a service; there is no per-port stop.
 - `list` prints dead tunnels once with status `DEAD`, dumps their SSH log to
-  stderr, and then removes their state and log files.
-- `logs` without arguments shows the logs of every known tunnel.
+  stderr, and then removes their state file. The log stays behind.
+- `logs` without arguments shows the logs of every known tunnel, followed by
+  the logs of runs that have ended: failed starts, dead tunnels and earlier
+  runs of a tunnel started again.
+- SSH logs are kept for **14 days** after their tunnel ends, so the reason a
+  tunnel failed or dropped can still be looked up later. `list` removes the
+  expired ones. `stop` deletes the log of a tunnel it stops, but keeps the log
+  of one that had already died on its own.
 - `edit` falls back to `notepad.exe` on Windows and to `nano`, `vim` or `vi`
   elsewhere when neither `$VISUAL` nor `$EDITOR` is set.
 - `sshforward --version` is equivalent to `sshforward version` for the version
@@ -417,6 +423,7 @@ All under `~/.sshforward/` (`%USERPROFILE%\.sshforward\` on Windows):
 | `config.yaml`                                | Service definitions                     |
 | `tunnels/<host>-<service>[-<port>].json`     | Tunnel state (PID, ports, started at)   |
 | `tunnels/<host>-<service>[-<port>].log`      | SSH stderr, written by `ssh -E`         |
+| `tunnels/<host>-<service>[-<port>].<time>.log` | Log of an earlier run, kept 14 days   |
 | `tunnels/<host>-<service>[-<port>].lock`     | Lock held during start/stop             |
 | `update-check.json`                          | Last release lookup, refreshed daily    |
 
@@ -427,8 +434,12 @@ All under `~/.sshforward/` (`%USERPROFILE%\.sshforward\` on Windows):
 - **Logging**: SSH writes its own log via `-E`, so no file handles are
   inherited — required for a fully detached process on Windows.
 - **Liveness**: a stored PID counts as a live tunnel only when the process
-  exists *and* its image is `ssh`, so a recycled PID cannot masquerade as a
-  running tunnel. An exited-but-unreaped process counts as dead.
+  exists, its image is `ssh`, *and* it was created no later than the tunnel's
+  recorded start time. After a reboot the OS can hand a stored PID to another
+  `ssh` — an interactive session, git, an editor's remote helper, or a tunnel
+  started after the reboot. That process is necessarily newer than the state
+  file, so it is never mistaken for the old tunnel, and `stop` never kills it.
+  An exited-but-unreaped process counts as dead.
 - **Port reservation**: a chosen local port is held open by sshforward from the
   moment it is picked until the instant `ssh` is spawned, so a concurrent
   `sshforward` run — or another port of the same service — cannot take it in
@@ -467,6 +478,16 @@ Common causes:
 - Port already in use — another process is binding the local port
 - Authentication failure — the key needs a passphrase, or the agent is locked;
   remember that `BatchMode=yes` turns any prompt into an immediate failure
+
+The log stays readable through `logs` for 14 days after the tunnel ends, also
+after `list` has cleaned the tunnel up.
+
+**All tunnels are DEAD after a reboot:**
+
+Expected — tunnels are plain `ssh` processes and do not survive a restart of
+the machine. Run `sshforward list` to clean them up and start the ones you need
+again. Their state files are recognised as stale even when the OS has since
+reused a stored PID for another process.
 
 **`host "…" not found in …/.ssh/config. Available hosts: …`:**
 
