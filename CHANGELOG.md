@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stopping a stale entry whose PID now belongs to a tunnel started after the
   reboot no longer kills that new tunnel.
 
+### Security
+
+- Builds now use Go 1.27.3, pinned with a `toolchain` directive, which fixes
+  vulnerabilities in the standard library reachable from sshforward:
+  `net/http` and HTTP/2 (GO-2026-6603, -6605, -6608, -6610, -6611, -6613,
+  -6617), `crypto/tls` (GO-2026-6607) and `crypto/x509` (GO-2026-6809).
+  Previously CI could build releases with any cached Go 1.27.x.
+
 ### Changed
 
 - ssh logs are kept for 14 days after their tunnel ends instead of being
