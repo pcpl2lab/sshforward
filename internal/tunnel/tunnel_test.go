@@ -310,3 +310,130 @@ func TestBuildSSHArgs_OptionsAcceptedByRealSSH(t *testing.T) {
 		t.Errorf("OpenSSH rejected the options sshforward passes: %v\n%s", err, out)
 	}
 }
+
+// startFakeSSHProcess spawns the stand-in ssh directly, standing for an ssh
+// process that sshforward did not start — e.g. one that inherited a stored PID
+// after a reboot.
+func startFakeSSHProcess(t *testing.T) int {
+	t.Helper()
+	useFakeSSH(t)
+	path, _ := lookSSHPath()
+	cmd := exec.Command(path, "-N")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start stand-in ssh: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	return cmd.Process.Pid
+}
+
+func TestTunnelStateIsAlive_SSHBornAfterStateIsNotTheTunnel(t *testing.T) {
+	pid := startFakeSSHProcess(t)
+
+	recycled := &TunnelState{PID: pid, StartedAt: time.Now().Add(-time.Hour)}
+	if recycled.IsAlive() {
+		t.Error("an ssh process created after the tunnel was recorded must not count as that tunnel")
+	}
+
+	own := &TunnelState{PID: pid, StartedAt: time.Now()}
+	if !own.IsAlive() {
+		t.Error("an ssh process created before the tunnel was recorded should count as alive")
+	}
+}
+
+func TestStop_RecycledSSHPIDIsNotKilled(t *testing.T) {
+	pid := startFakeSSHProcess(t)
+
+	tunnelsDir := t.TempDir()
+	state := &TunnelState{
+		Host: "localhost", Service: "test", PID: pid,
+		LocalPort: 13306, RemoteHost: "127.0.0.1", RemotePort: 22,
+		StartedAt: time.Now().Add(-time.Hour), // recorded before a "reboot"
+	}
+	statePath := StatePath(tunnelsDir, "localhost", "test")
+	if err := SaveState(statePath, state); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	if err := Stop(tunnelsDir, "localhost", "test"); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
+		t.Error("stale state file not removed")
+	}
+	if !IsProcessAlive(pid) {
+		t.Errorf("stop killed unrelated ssh process %d that merely reused the stored PID", pid)
+	}
+}
+
+func TestStart_RecycledSSHPIDDoesNotBlock(t *testing.T) {
+	pid := startFakeSSHProcess(t)
+
+	tunnelsDir := t.TempDir()
+	state := &TunnelState{
+		Host: "localhost", Service: "test", PID: pid,
+		LocalPort: 13306, RemoteHost: "127.0.0.1", RemotePort: 22,
+		StartedAt: time.Now().Add(-time.Hour),
+	}
+	if err := SaveState(StatePath(tunnelsDir, "localhost", "test"), state); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	states, err := Start(&StartOptions{
+		Host: "localhost", Service: "test",
+		Ports:          []PortForward{{RemoteHost: "127.0.0.1", RemotePort: 22}},
+		TunnelsDir:     tunnelsDir,
+		SkipValidation: true,
+	})
+	if err != nil {
+		t.Fatalf("start over a recycled ssh PID should succeed, got: %v", err)
+	}
+	t.Cleanup(func() { _ = Stop(tunnelsDir, "localhost", "test") })
+	if states[0].PID == pid {
+		t.Errorf("state still holds the recycled PID %d", pid)
+	}
+}
+
+func TestDuplicatePIDAfterReboot(t *testing.T) {
+	// After a reboot a tunnel started anew can get the PID a stale state file
+	// still records, so list shows two tunnels with one PID. Only the newer is
+	// real, and stopping the stale one must not take the real one down.
+	useFakeSSH(t)
+	tunnelsDir := t.TempDir()
+
+	states, err := Start(&StartOptions{
+		Host: "localhost", Service: "fresh",
+		Ports:          []PortForward{{RemoteHost: "127.0.0.1", RemotePort: 22}},
+		TunnelsDir:     tunnelsDir,
+		SkipValidation: true,
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	t.Cleanup(func() { _ = Stop(tunnelsDir, "localhost", "fresh") })
+	fresh := states[0]
+
+	stale := &TunnelState{
+		Host: "localhost", Service: "stale", PID: fresh.PID,
+		LocalPort: 13307, RemoteHost: "127.0.0.1", RemotePort: 22,
+		StartedAt: fresh.StartedAt.Add(-time.Hour), // recorded before the reboot
+	}
+	if err := SaveState(StatePath(tunnelsDir, "localhost", "stale"), stale); err != nil {
+		t.Fatal(err)
+	}
+
+	if stale.IsAlive() {
+		t.Error("stale entry sharing the new tunnel's PID reported alive")
+	}
+	if !fresh.IsAlive() {
+		t.Error("new tunnel reported dead")
+	}
+	if err := Stop(tunnelsDir, "localhost", "stale"); err != nil {
+		t.Fatalf("stop stale: %v", err)
+	}
+	if !IsProcessAlive(fresh.PID) {
+		t.Error("stopping the stale entry killed the new tunnel")
+	}
+}

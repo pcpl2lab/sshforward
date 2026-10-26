@@ -126,9 +126,9 @@ func Start(opts *StartOptions) ([]*TunnelState, error) {
 
 		statePath := StatePathWithPort(opts.TunnelsDir, opts.Host, opts.Service, rp.Name)
 		if existing, err := LoadState(statePath); err == nil {
-			// IsTunnelAlive, not IsProcessAlive: a recycled PID belonging to an
+			// IsAlive, not IsProcessAlive: a recycled PID belonging to an
 			// unrelated process must not block a start. Matches list and stop.
-			if IsTunnelAlive(existing.PID) {
+			if existing.IsAlive() {
 				return nil, fmt.Errorf("tunnel %s/%s%s is already running on port %d (PID: %d)",
 					opts.Host, opts.Service, portLabel(rp.Name), existing.LocalPort, existing.PID)
 			}
@@ -318,10 +318,9 @@ func stopSingle(tunnelsDir string, state *TunnelState) error {
 
 	statePath := StatePathWithPort(tunnelsDir, state.Host, state.Service, state.PortName)
 
-	if IsProcessAlive(state.PID) {
-		if !IsSSHProcess(state.PID) {
-			return RemoveState(statePath)
-		}
+	// A dead tunnel only needs its files cleaned up. That includes a PID now
+	// held by some other process, which must not be killed in its place.
+	if state.IsAlive() {
 		// Wait for the process to actually go away before dropping the state
 		// file: reporting success while ssh still held the local port would
 		// leave an untracked tunnel behind.

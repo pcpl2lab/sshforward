@@ -3,10 +3,12 @@
 package tunnel
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/windows"
 )
@@ -56,6 +58,25 @@ func IsSSHProcess(pid int) bool {
 	}
 	name := filepath.Base(windows.UTF16ToString(buf[:size]))
 	return strings.EqualFold(name, "ssh.exe")
+}
+
+// processStartTime returns when the process was created. Windows records it as
+// wall-clock time at creation, so later clock adjustments do not shift it.
+func processStartTime(pid int) (time.Time, error) {
+	if pid <= 0 || uint64(pid) > math.MaxUint32 {
+		return time.Time{}, fmt.Errorf("invalid pid %d", pid)
+	}
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer windows.CloseHandle(h)
+
+	var creation, exit, kernel, user windows.Filetime
+	if err := windows.GetProcessTimes(h, &creation, &exit, &kernel, &user); err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(0, creation.Nanoseconds()), nil
 }
 
 // KillProcess terminates the process. Windows has no graceful equivalent here:

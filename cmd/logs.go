@@ -39,7 +39,7 @@ var logsCmd = &cobra.Command{
 				label = fmt.Sprintf("%s/%s/%s", s.Host, s.Service, s.PortName)
 			}
 			status := "active"
-			if !tunnel.IsTunnelAlive(s.PID) {
+			if !s.IsAlive() {
 				status = "DEAD"
 			}
 			log := tunnel.ReadLog(tunnelsDir, s.Host, s.Service, s.PortName)

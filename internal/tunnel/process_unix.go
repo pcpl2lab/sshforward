@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 func IsProcessAlive(pid int) bool {
@@ -62,6 +63,65 @@ func IsSSHProcess(pid int) bool {
 	}
 	name := strings.TrimSpace(string(data))
 	return name == "ssh"
+}
+
+// userHZ is the unit of the start time in /proc/<pid>/stat. The kernel exports
+// it to userspace as a fixed 100 regardless of its internal tick rate.
+const userHZ = 100
+
+// processStartTime returns when the process was created.
+func processStartTime(pid int) (time.Time, error) {
+	if pid <= 0 {
+		return time.Time{}, fmt.Errorf("invalid pid %d", pid)
+	}
+	// Linux: field 22 of /proc/<pid>/stat is the start time in ticks since
+	// boot; btime in /proc/stat anchors boot to the wall clock.
+	if stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)); err == nil {
+		sys, err := os.ReadFile("/proc/stat")
+		if err != nil {
+			return time.Time{}, err
+		}
+		return procStartTime(stat, sys)
+	}
+	// macOS and friends: ps prints the start time in ctime(3) format. LC_ALL=C
+	// keeps the day and month names parseable.
+	cmd := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "lstart=")
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	out, err := cmd.Output()
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.ParseInLocation("Mon Jan 2 15:04:05 2006", strings.Join(strings.Fields(string(out)), " "), time.Local)
+}
+
+// procStartTime computes a process start time from the contents of
+// /proc/<pid>/stat and /proc/stat.
+func procStartTime(stat, sys []byte) (time.Time, error) {
+	// comm may contain spaces and parentheses, so fields are counted after the
+	// last ')'. The first of them is field 3 (state), making starttime the 20th.
+	i := bytes.LastIndexByte(stat, ')')
+	if i < 0 {
+		return time.Time{}, fmt.Errorf("malformed /proc stat")
+	}
+	fields := strings.Fields(string(stat[i+1:]))
+	if len(fields) < 20 {
+		return time.Time{}, fmt.Errorf("malformed /proc stat")
+	}
+	ticks, err := strconv.ParseInt(fields[19], 10, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("malformed /proc stat start time: %w", err)
+	}
+
+	for line := range strings.Lines(string(sys)) {
+		if v, ok := strings.CutPrefix(line, "btime "); ok {
+			boot, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+			if err != nil {
+				return time.Time{}, fmt.Errorf("malformed btime: %w", err)
+			}
+			return time.Unix(boot, 0).Add(time.Duration(ticks) * time.Second / userHZ), nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("btime not found in /proc/stat")
 }
 
 // KillProcess asks the process to terminate, giving ssh a chance to tear the

@@ -92,3 +92,23 @@ func TestIsProcessAlive_ExitedChildIsDead(t *testing.T) {
 		t.Fatalf("helper process %d still reported alive 5s after being killed", pid)
 	}
 }
+
+func TestProcessStartTime_Child(t *testing.T) {
+	before := time.Now()
+	pid := startSleeper(t)
+	after := time.Now()
+
+	started, err := processStartTime(pid)
+	if err != nil {
+		t.Fatalf("processStartTime(%d): %v", pid, err)
+	}
+	if started.Before(before.Add(-startTimeTolerance)) || started.After(after.Add(startTimeTolerance)) {
+		t.Errorf("start time %v outside the spawn window [%v, %v]", started, before, after)
+	}
+}
+
+func TestProcessStartTime_DeadPID(t *testing.T) {
+	if _, err := processStartTime(0x7FFFFFF0); err == nil {
+		t.Error("expected an error for a nonexistent PID")
+	}
+}

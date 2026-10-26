@@ -40,7 +40,7 @@ var listCmd = &cobra.Command{
 				portName = s.PortName
 			}
 
-			if !tunnel.IsTunnelAlive(s.PID) {
+			if !s.IsAlive() {
 				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\t%d\t%s\n",
 					s.Host, s.Service, portName, s.LocalPort, remote, s.PID, "DEAD")
 				deadTunnels = append(deadTunnels, s)
