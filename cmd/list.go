@@ -19,6 +19,8 @@ var listCmd = &cobra.Command{
 			return err
 		}
 
+		_, _ = tunnel.CleanOldLogs(tunnelsDir) // best-effort, like the dead-tunnel cleanup below
+
 		states, err := tunnel.ListStates(tunnelsDir)
 		if err != nil {
 			return err
@@ -51,7 +53,9 @@ var listCmd = &cobra.Command{
 		}
 		w.Flush()
 
-		// Show logs for dead tunnels and clean them up
+		// Show logs for dead tunnels and drop their state. The log stays behind
+		// for `logs` until CleanOldLogs expires it: it is the only record of
+		// why the tunnel died.
 		for _, s := range deadTunnels {
 			log := tunnel.ReadLog(tunnelsDir, s.Host, s.Service, s.PortName)
 			if log != "" {
@@ -63,7 +67,10 @@ var listCmd = &cobra.Command{
 			}
 			statePath := tunnel.StatePathWithPort(tunnelsDir, s.Host, s.Service, s.PortName)
 			_ = tunnel.RemoveState(statePath) // best-effort cleanup of dead tunnel
-			_ = os.Remove(tunnel.LogPath(tunnelsDir, s.Host, s.Service, s.PortName))
+		}
+		if len(deadTunnels) > 0 {
+			fmt.Fprintf(os.Stderr, "\nLogs of dead tunnels are kept for %d days: sshforward logs <host> <service>\n",
+				int(tunnel.LogRetention.Hours()/24))
 		}
 
 		return nil

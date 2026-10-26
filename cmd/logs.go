@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/pcpl2lab/sshforward/internal/tunnel"
 	"github.com/spf13/cobra"
@@ -19,8 +20,10 @@ var logsCmd = &cobra.Command{
 		}
 
 		var states []*tunnel.TunnelState
+		key := ""
 		if len(args) == 2 {
 			states, err = tunnel.ListServiceStates(tunnelsDir, args[0], args[1])
+			key = tunnel.StateKey(args[0], args[1], "")
 		} else {
 			states, err = tunnel.ListStates(tunnelsDir)
 		}
@@ -28,9 +31,27 @@ var logsCmd = &cobra.Command{
 			return err
 		}
 
-		if len(states) == 0 {
+		// Logs of runs that are over — failed starts, dead tunnels, earlier
+		// runs of a restarted one — kept for tunnel.LogRetention.
+		archived, err := tunnel.ListArchivedLogs(tunnelsDir, key)
+		if err != nil {
+			return err
+		}
+
+		if len(states) == 0 && len(archived) == 0 {
 			fmt.Println("No tunnels found")
 			return nil
+		}
+
+		for _, a := range archived {
+			fmt.Fprintf(os.Stdout, "--- %s (ended, last written %s) ---\n",
+				filepath.Base(a.Path), a.ModTime.Local().Format("2006-01-02 15:04:05"))
+			if log := a.Read(); log == "" {
+				fmt.Println("(no log)")
+			} else {
+				fmt.Println(log)
+			}
+			fmt.Println()
 		}
 
 		for _, s := range states {

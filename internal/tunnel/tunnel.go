@@ -184,6 +184,10 @@ func startSingle(sshPath string, opts *StartOptions, pf PortForward, res *port.R
 	logPath := LogPath(opts.TunnelsDir, opts.Host, opts.Service, pf.Name)
 	forwardArg := fmt.Sprintf("%d:%s:%d", localPort, pf.RemoteHost, pf.RemotePort)
 
+	if err := archiveLog(logPath); err != nil {
+		return nil, fmt.Errorf("cannot archive the previous run's log: %w", err)
+	}
+
 	// Use SSH's own -E flag for logging — no file handle inheritance needed.
 	// This allows the process to be fully detached on Windows.
 	cmd := exec.Command(sshPath, buildSSHArgs(logPath, forwardArg, opts.Host)...) // nosemgrep: dangerous-exec-command
@@ -318,18 +322,21 @@ func stopSingle(tunnelsDir string, state *TunnelState) error {
 
 	statePath := StatePathWithPort(tunnelsDir, state.Host, state.Service, state.PortName)
 
-	// A dead tunnel only needs its files cleaned up. That includes a PID now
-	// held by some other process, which must not be killed in its place.
-	if state.IsAlive() {
-		// Wait for the process to actually go away before dropping the state
-		// file: reporting success while ssh still held the local port would
-		// leave an untracked tunnel behind.
-		if err := TerminateAndWait(state.PID); err != nil {
-			return err
-		}
+	// A dead tunnel only needs its state dropped. That includes a PID now held
+	// by some other process, which must not be killed in its place. Its log is
+	// the only record of why it died, so it stays for LogRetention.
+	if !state.IsAlive() {
+		return RemoveState(statePath)
 	}
 
-	// Clean up log file (best-effort — it may not exist)
+	// Wait for the process to actually go away before dropping the state
+	// file: reporting success while ssh still held the local port would
+	// leave an untracked tunnel behind.
+	if err := TerminateAndWait(state.PID); err != nil {
+		return err
+	}
+
+	// Stopped on request: nothing went wrong, so its log has nothing to tell.
 	_ = os.Remove(LogPath(tunnelsDir, state.Host, state.Service, state.PortName))
 
 	return RemoveState(statePath)

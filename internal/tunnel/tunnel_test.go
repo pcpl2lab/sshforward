@@ -396,6 +396,60 @@ func TestStart_RecycledSSHPIDDoesNotBlock(t *testing.T) {
 	}
 }
 
+func TestStart_ArchivesPreviousRunLog(t *testing.T) {
+	useFakeSSH(t)
+
+	tunnelsDir := t.TempDir()
+	logPath := LogPath(tunnelsDir, "localhost", "test", "")
+	if err := os.WriteFile(logPath, []byte("previous run: Connection reset"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Start(&StartOptions{
+		Host: "localhost", Service: "test",
+		Ports:          []PortForward{{RemoteHost: "127.0.0.1", RemotePort: 22}},
+		TunnelsDir:     tunnelsDir,
+		SkipValidation: true,
+	}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	t.Cleanup(func() { _ = Stop(tunnelsDir, "localhost", "test") })
+
+	if got := ReadLog(tunnelsDir, "localhost", "test", ""); got == "previous run: Connection reset" || len(got) > len("stand-in ssh client") {
+		t.Errorf("new run's log still carries the previous run: %q", got)
+	}
+	archived, err := ListArchivedLogs(tunnelsDir, StateKey("localhost", "test", ""))
+	if err != nil || len(archived) != 1 || archived[0].Read() != "previous run: Connection reset" {
+		t.Errorf("previous run's log not archived: %v, %v", archived, err)
+	}
+}
+
+func TestStop_DeadTunnelKeepsLog(t *testing.T) {
+	tunnelsDir := t.TempDir()
+	state := &TunnelState{
+		Host: "localhost", Service: "test", PID: 0x7FFFFFF0,
+		LocalPort: 13306, RemoteHost: "127.0.0.1", RemotePort: 22,
+	}
+	statePath := StatePath(tunnelsDir, "localhost", "test")
+	if err := SaveState(statePath, state); err != nil {
+		t.Fatal(err)
+	}
+	logPath := LogPath(tunnelsDir, "localhost", "test", "")
+	if err := os.WriteFile(logPath, []byte("Timeout, server not responding."), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Stop(tunnelsDir, "localhost", "test"); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
+		t.Error("state file of a dead tunnel not removed")
+	}
+	if _, err := os.Stat(logPath); err != nil {
+		t.Error("log of a tunnel that died on its own was deleted; it is the only record of why")
+	}
+}
+
 func TestDuplicatePIDAfterReboot(t *testing.T) {
 	// After a reboot a tunnel started anew can get the PID a stale state file
 	// still records, so list shows two tunnels with one PID. Only the newer is
