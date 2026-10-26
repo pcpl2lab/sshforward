@@ -1,0 +1,42 @@
+# Changelog
+
+All notable changes to sshforward are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Fixed
+
+- Tunnels left over from before a reboot are now always recognised as dead.
+  Previously, if the stored PID had been reassigned to another `ssh` process
+  (an interactive session, git, an editor's remote helper), the stale tunnel
+  showed as `active` in `list`, `start` refused with "already running", and
+  `stop` killed that unrelated `ssh` process. sshforward now also checks that
+  the process was created before the tunnel was recorded. State files written
+  by 0.1.0 are handled too, so nothing needs to be cleaned up by hand.
+- `logs` reports a tunnel's status with the same check, instead of showing a
+  stale tunnel as `active`.
+- Stopping a stale entry whose PID now belongs to a tunnel started after the
+  reboot no longer kills that new tunnel.
+
+### Changed
+
+- ssh logs are kept for 14 days after their tunnel ends instead of being
+  deleted right away (dead tunnels in `list`) or never (failed starts, which
+  piled up in `~/.sshforward/tunnels/`). `list` removes the expired ones.
+- `logs` also shows logs of runs that have ended — failed starts, dead
+  tunnels, earlier runs of a restarted tunnel — so the reason a tunnel failed
+  or dropped can still be looked up later.
+- Starting a tunnel again archives the previous run's log as
+  `<host>-<service>[-<port>].<timestamp>.log` instead of appending to it.
+- `stop` keeps the log of a tunnel that had already died on its own; only the
+  log of a tunnel it actually stopped is removed.
+
+## [0.1.0] - 2026-09-01
+
+First public release.
+
+[Unreleased]: https://github.com/pcpl2lab/sshforward/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/pcpl2lab/sshforward/releases/tag/v0.1.0
