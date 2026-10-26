@@ -325,6 +325,8 @@ Error: service "mysql": local_port: 99999 is out of range: must be 1-65535
 | `sshforward logs [<host> <service>]` | View SSH logs for debugging |
 | `sshforward config` | Display loaded configuration |
 | `sshforward edit` | Open the config file in `$VISUAL` / `$EDITOR` |
+| `sshforward add` | Add a service with an interactive form |
+| `sshforward manage` | Add, edit, rename or delete services with an interactive form |
 | `sshforward update` | Install the newest release, or say how to update |
 | `sshforward update --check` | Report whether a newer release exists, change nothing |
 | `sshforward version` | Print version, commit, build date and os/arch |
@@ -347,6 +349,31 @@ Notes:
   string alone.
 - Every command exits `0` on success and `1` on failure, printing a single
   `Error: …` line to stderr.
+
+### Managing services interactively
+
+`sshforward add` asks for a service name, an optional `remote_host` and its
+ports, shows the lines it will write and appends them to the `services:`
+section. `sshforward manage` lists the services in the config: pick one to
+edit, rename or delete it, or pick "+ New service" to add one. After each
+change, saved or cancelled, it returns to the list; `q` there quits, and
+Ctrl+C quits from anywhere. A missing config file is created first, as with
+`edit`.
+
+- The whole service is on one screen, filled with its current values: move
+  between fields with Tab / Shift+Tab and correct any of them in place. "Next"
+  at the bottom saves, adds a port or removes one.
+- Only the service being changed is touched; the rest of the file, comments
+  and blank lines included, stays byte for byte. Rename changes just the key
+  line. Delete also removes the comment lines directly above the service.
+- Every change is previewed and saved only after you confirm. Esc or Ctrl+C
+  cancels and writes nothing. If an edit would drop comments inside the
+  service, or the service has running tunnels, the preview says so — running
+  tunnels keep their old settings until you stop and start them again.
+- A config that does not load is not edited; fix it first. If the file changes
+  while the form is open, nothing is written.
+- Without a terminal (piped input, CI) both commands fail right away and point
+  to `sshforward edit`. All other commands work without a terminal as before.
 
 ## Updates
 

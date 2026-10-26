@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `sshforward add` adds a service to the config with an interactive form, and
+  `sshforward manage` adds, edits, renames or deletes services the same way.
+  Each change is previewed and needs confirmation. Only the affected service
+  changes; the rest of the file, comments included, is preserved. Without a
+  terminal both commands refuse and point to `sshforward edit`; all other
+  commands are unaffected.
+
 ## [0.1.1] - 2026-10-26
 
 ### Fixed
