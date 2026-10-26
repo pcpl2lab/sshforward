@@ -101,7 +101,7 @@ jobs:
           echo "GPG_KEY_FILE=$RUNNER_TEMP/keys/gpg.asc" >>"$GITHUB_ENV"
           echo "APK_KEY_FILE=$RUNNER_TEMP/keys/apk.pem" >>"$GITHUB_ENV"
 
-      - uses: goreleaser/goreleaser-action@v7.2.3
+      - uses: goreleaser/goreleaser-action@v7.3.0
         with:
           version: "~> v2"
           args: release --clean ${{ inputs.draft && '--draft' || '' }}
